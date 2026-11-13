@@ -1,4 +1,5 @@
 var TOKEN_KEY = "fest7_admin_token";
+var BOOT_CACHE_KEY = "fest7_admin_bootstrap";
 
 function getToken() { return sessionStorage.getItem(TOKEN_KEY) || ""; }
 function setToken(t) {
@@ -16,32 +17,95 @@ var ui = {
   selectedEmpId: null,
   csvDraft: "",
   loginError: "",
-  editing: null
+  editing: null,
+  refreshing: false,
+  pendingRender: false
 };
 
-function refreshMe() {
-  var t = getToken();
-  if (!t) { ui.authed = false; return Promise.resolve(); }
-  return run("adminMe", t).then(function (me) { ui.authed = !!me.authenticated; });
+function readBootstrapCache(month) {
+  try {
+    var parsed = JSON.parse(sessionStorage.getItem(BOOT_CACHE_KEY) || "null");
+    if (!parsed || parsed.month !== month || !parsed.data) return null;
+    return parsed.data;
+  } catch (err) {
+    return null;
+  }
 }
 
-function loadSettlement() {
-  return run("adminGetSettlement", getToken(), ui.month).then(function (S) { ui.settlement = S; });
+function writeBootstrapCache(month, data) {
+  try {
+    sessionStorage.setItem(BOOT_CACHE_KEY, JSON.stringify({ month: month, data: data, at: Date.now() }));
+  } catch (err) { /* quota / private mode */ }
 }
-function loadSubmissions() {
-  return run("adminGetSubmissions", getToken()).then(function (data) { ui.submissions = data.submissions || []; });
+
+function clearBootstrapCache() {
+  try { sessionStorage.removeItem(BOOT_CACHE_KEY); } catch (err) { /* ignore */ }
 }
-function loadEmployees() {
-  return run("adminGetEmployees", getToken(), ui.month).then(function (data) { ui.employees = data.employees || []; });
+
+function applyBootstrap(data) {
+  if (!data) return;
+  ui.settlement = data.settlement || null;
+  ui.submissions = (data.submissions && data.submissions.submissions) || data.submissions || [];
+  ui.employees = (data.employees && data.employees.employees) || data.employees || [];
 }
+
 function loadAll() {
-  return Promise.all([loadSettlement(), loadSubmissions(), loadEmployees()]);
+  return run("adminBootstrap", getToken(), ui.month).then(function (data) {
+    applyBootstrap(data);
+    writeBootstrapCache(ui.month, data);
+    return data;
+  });
 }
+
+function refreshInBackground() {
+  ui.refreshing = true;
+  setRefreshing(true);
+  var ind = document.getElementById("admin-sync-ind");
+  if (ind) ind.hidden = false;
+  return loadAll().then(function () {
+    ui.refreshing = false;
+    setRefreshing(false);
+    renderIfIdle();
+  }).catch(function (err) {
+    ui.refreshing = false;
+    setRefreshing(false);
+    setRefreshing(false);
+    var expired = /登录已过期|请先登录/.test(err && err.message || "");
+    if (expired) {
+      setToken("");
+      clearBootstrapCache();
+      ui.authed = false;
+      toast(err.message, "err");
+      render();
+      return;
+    }
+    toast(err.message, "err");
+    renderIfIdle();
+  });
+}
+
+function renderIfIdle() {
+  if (isFormFieldFocused() || ui.editing) {
+    ui.pendingRender = true;
+    setRefreshing(ui.refreshing);
+    var ind = document.getElementById("admin-sync-ind");
+    if (ind) ind.hidden = !ui.refreshing;
+    return;
+  }
+  ui.pendingRender = false;
+  render();
+}
+
 function pendingCount() {
   return ui.submissions.filter(function (s) { return s.status === "pending"; }).length;
 }
 
+function syncIndicatorHtml() {
+  return '<span class="sync-indicator" id="admin-sync-ind"' + (ui.refreshing ? "" : " hidden") + '><span class="sync-dot"></span>更新中…</span>';
+}
+
 function render() {
+  setRefreshing(!!ui.refreshing);
   var app = document.getElementById("app");
   if (!ui.authed) {
     app.innerHTML =
@@ -65,7 +129,7 @@ function render() {
     : ui.tab === "employees" ? renderEmployees()
     : renderData();
   app.innerHTML =
-    '<div class="page-intro"><h2>管理后台</h2><p>审批员工申请，维护每月基本工资，并完成银行卡与现金的月度结算。</p></div>' +
+    '<div class="page-intro"><h2>管理后台' + syncIndicatorHtml() + "</h2><p>审批员工申请，维护每月基本工资，并完成银行卡与现金的月度结算。</p></div>" +
     '<div class="tabs" id="admin-tabs">' + tabs + "</div>" + body +
     '<footer class="note">FEST7 考勤工资结算 · 数据保存在本 Google 表格中。</footer>';
   bindAdmin();
@@ -77,7 +141,7 @@ function kpi(lbl, val, sub) {
 
 function renderSettle() {
   var S = ui.settlement;
-  if (!S) return '<div class="card empty">正在加载结算…</div>';
+  if (!S) return '<div class="card empty">' + (ui.refreshing ? "正在加载结算…" : "正在加载结算…") + "</div>";
   var kpis = '<div class="kpis">' +
     kpi("工作日", S.workdays + " 天", "周一至周五，假日仍计工作日") +
     kpi("标准工时", S.capacity + " 小时", "每天 8.5 小时") +
@@ -88,6 +152,7 @@ function renderSettle() {
   var rows = S.rows.map(function (r) {
     var active = ui.selectedEmpId === r.emp.id ? " active" : "";
     var note = r.emp.note ? '<span class="note-dot" title="' + esc(r.emp.note) + '">*</span>' : "";
+    var bankKey = "bank:" + r.emp.id;
     return "<tr class=\"" + active + "\" data-emp=\"" + esc(r.emp.id) + "\">" +
       '<td class="name-cell">' + esc(r.emp.name) + note + "</td>" +
       '<td class="num">' + formatMoney(r.base) + "</td>" +
@@ -98,7 +163,7 @@ function renderSettle() {
       '<td class="num' + (r.otPay ? " pos" : "") + '">' + (r.otPay ? formatMoney(r.otPay) : "—") + "</td>" +
       '<td class="num' + (r.customSum < 0 ? " neg" : r.customSum > 0 ? " pos" : "") + '">' + (r.customSum ? formatMoney(r.customSum) : "—") + "</td>" +
       '<td class="num"><strong>' + formatMoney(r.gross) + "</strong></td>" +
-      '<td class="num" onclick="event.stopPropagation()"><input class="bank" data-bank="' + esc(r.emp.id) + '" type="number" step="0.01" value="' + (r.bank ? String(r.bank) : "") + '" placeholder="0.00"></td>' +
+      '<td class="num" onclick="event.stopPropagation()"><div class="input-with-state"><input class="bank" data-bank="' + esc(r.emp.id) + '" type="number" step="0.01" value="' + (r.bank ? String(r.bank) : "") + '" placeholder="0.00">' + saveStateHtml(bankKey) + "</div></td>" +
       '<td class="num' + (r.cash < 0 ? " neg" : "") + '">' + formatMoney(r.cash) + "</td></tr>";
   }).join("");
   var t = S.totals;
@@ -215,9 +280,11 @@ function renderEditModal() {
 
 function renderEmployees() {
   var rows = ui.employees.map(function (e) {
+    var baseKey = "base:" + e.id;
+    var noteKey = "note:" + e.id;
     return "<tr><td class=\"name-cell\">" + esc(e.name) + "</td>" +
-      '<td><input class="control" style="width:130px;padding:6px 8px" data-base="' + esc(e.id) + '" type="number" step="0.01" min="0" value="' + e.monthBase + '"></td>' +
-      '<td><input class="control" style="min-width:220px;padding:6px 8px" data-note="' + esc(e.id) + '" value="' + esc(e.note || "") + '" placeholder="可选备注"></td>' +
+      '<td><div class="input-with-state"><input class="control" style="width:130px;padding:6px 8px" data-base="' + esc(e.id) + '" type="number" step="0.01" min="0" value="' + e.monthBase + '">' + saveStateHtml(baseKey) + "</div></td>" +
+      '<td><div class="input-with-state"><input class="control" style="min-width:220px;padding:6px 8px" data-note="' + esc(e.id) + '" value="' + esc(e.note || "") + '" placeholder="可选备注">' + saveStateHtml(noteKey) + "</div></td>" +
       '<td><button type="button" class="btn btn-ghost btn-sm" data-del-emp="' + esc(e.id) + '">删除</button></td></tr>';
   }).join("");
   return '<div class="toolbar">' +
@@ -248,15 +315,65 @@ function renderData() {
 
 function onLogin(e) {
   e.preventDefault();
-  var password = e.target.querySelector("[name=password]").value;
-  run("adminLogin", password).then(function (res) {
-    setToken(res.token);
-    ui.loginError = "";
-    ui.authed = true;
-    return loadAll();
-  }).then(render).catch(function (err) {
-    ui.loginError = err.message;
+  var form = e.target;
+  var btn = form.querySelector('button[type="submit"]');
+  var password = form.querySelector("[name=password]").value;
+  ui.loginError = "";
+  withButtonBusy(btn, "登录中…", function () {
+    return run("adminLogin", password).then(function (res) {
+      setToken(res.token);
+      ui.authed = true;
+      ui.refreshing = true;
+      var cached = readBootstrapCache(ui.month);
+      if (cached) applyBootstrap(cached);
+      render();
+      return loadAll();
+    });
+  }).then(function () {
+    ui.refreshing = false;
     render();
+  }).catch(function (err) {
+    if (ui.authed && getToken()) {
+      ui.refreshing = false;
+      toast(err.message || "数据加载失败", "err");
+      render();
+      return;
+    }
+    ui.loginError = err.message;
+    ui.authed = false;
+    toast(err.message, "err");
+    render();
+  });
+}
+
+function changeMonth(nextMonth, preferEmployeesTab) {
+  ui.month = nextMonth || currentMonth();
+  ui.selectedEmpId = null;
+  var cached = readBootstrapCache(ui.month);
+  if (cached) applyBootstrap(cached);
+  else ui.settlement = null;
+  ui.refreshing = true;
+  render();
+  loadAll().then(function () {
+    ui.refreshing = false;
+    render();
+  }).catch(function (err) {
+    ui.refreshing = false;
+    toast(err.message, "err");
+    render();
+  });
+}
+
+function applyBankLocally(empId, amount) {
+  if (!ui.settlement || !ui.settlement.rows) return;
+  var saved = round2(amount);
+  var t = ui.settlement.totals;
+  ui.settlement.rows.forEach(function (r) {
+    if (r.emp.id !== empId) return;
+    t.bank = round2((t.bank - r.bank) + saved);
+    t.cash = round2((t.cash - r.cash) + (r.gross - saved));
+    r.bank = saved;
+    r.cash = round2(r.gross - saved);
   });
 }
 
@@ -271,9 +388,7 @@ function bindAdmin() {
   });
   var monthInput = document.getElementById("month-input");
   if (monthInput) monthInput.addEventListener("change", function () {
-    ui.month = monthInput.value || currentMonth();
-    ui.selectedEmpId = null;
-    loadAll().then(render).catch(function (err) { toast(err.message, "err"); });
+    changeMonth(monthInput.value || currentMonth());
   });
   Array.prototype.forEach.call(document.querySelectorAll("#settle-table tbody tr"), function (tr) {
     tr.addEventListener("click", function () {
@@ -284,9 +399,31 @@ function bindAdmin() {
   });
   Array.prototype.forEach.call(document.querySelectorAll("input.bank"), function (inp) {
     inp.addEventListener("change", function () {
-      run("adminSetBank", getToken(), ui.month, inp.getAttribute("data-bank"), inp.value)
-        .then(loadSettlement).then(render)
-        .catch(function (err) { toast(err.message, "err"); });
+      var empId = inp.getAttribute("data-bank");
+      var key = "bank:" + empId;
+      var amount = Number(inp.value) || 0;
+      applyBankLocally(empId, amount);
+      setFieldSaveState(key, "saving", "保存中…");
+      inp.disabled = true;
+      run("adminSetBank", getToken(), ui.month, empId, inp.value)
+        .then(function (res) {
+          var saved = res && res.amount != null ? res.amount : amount;
+          applyBankLocally(empId, saved);
+          inp.disabled = false;
+          inp.value = saved ? String(saved) : "";
+          setFieldSaveState(key, "saved", "已保存 ✓");
+          toast("银行卡金额已保存", "ok");
+          renderIfIdle();
+          setTimeout(function () { setFieldSaveState(key, "", ""); }, 2000);
+        })
+        .catch(function (err) {
+          inp.disabled = false;
+          setFieldSaveState(key, "error", "失败");
+          toast(err.message, "err");
+        });
+    });
+    inp.addEventListener("blur", function () {
+      if (ui.pendingRender && !isFormFieldFocused()) renderIfIdle();
     });
   });
   var close = document.getElementById("close-drawer");
@@ -295,17 +432,19 @@ function bindAdmin() {
   if (bg) bg.addEventListener("click", function (e) { if (e.target === bg) { ui.selectedEmpId = null; render(); } });
   var exp = document.getElementById("export-csv");
   if (exp) exp.addEventListener("click", function () {
-    run("adminExportSettlementCsv", getToken(), ui.month).then(function (r) {
-      downloadText(r.filename, r.csv, "text/csv;charset=utf-8");
-      toast("已导出 CSV", "ok");
+    withButtonBusy(exp, "导出中…", function () {
+      return run("adminExportSettlementCsv", getToken(), ui.month).then(function (r) {
+        downloadText(r.filename, r.csv, "text/csv;charset=utf-8");
+        toast("已导出 CSV", "ok");
+      });
     }).catch(function (err) { toast(err.message, "err"); });
   });
 
   Array.prototype.forEach.call(document.querySelectorAll("[data-approve]"), function (b) {
-    b.addEventListener("click", function () { setStatus(b.getAttribute("data-approve"), "approved"); });
+    b.addEventListener("click", function () { setStatus(b.getAttribute("data-approve"), "approved", b); });
   });
   Array.prototype.forEach.call(document.querySelectorAll("[data-reject]"), function (b) {
-    b.addEventListener("click", function () { setStatus(b.getAttribute("data-reject"), "rejected"); });
+    b.addEventListener("click", function () { setStatus(b.getAttribute("data-reject"), "rejected", b); });
   });
   Array.prototype.forEach.call(document.querySelectorAll("[data-edit]"), function (b) {
     b.addEventListener("click", function (e) {
@@ -324,7 +463,7 @@ function bindAdmin() {
   Array.prototype.forEach.call(document.querySelectorAll("[data-del]"), function (b) {
     b.addEventListener("click", function (e) {
       e.stopPropagation();
-      deleteSubmission(b.getAttribute("data-del"));
+      deleteSubmission(b.getAttribute("data-del"), b);
     });
   });
 
@@ -342,21 +481,52 @@ function bindAdmin() {
 
   var empMonth = document.getElementById("emp-month");
   if (empMonth) empMonth.addEventListener("change", function () {
-    ui.month = empMonth.value || currentMonth();
-    loadEmployees().then(render).catch(function (err) { toast(err.message, "err"); });
+    changeMonth(empMonth.value || currentMonth());
   });
   Array.prototype.forEach.call(document.querySelectorAll("[data-base]"), function (inp) {
     inp.addEventListener("change", function () {
-      run("adminUpdateEmployee", getToken(), inp.getAttribute("data-base"), {
-        month: ui.month, monthBase: inp.value, defaultBase: inp.value
-      }).then(function () { toast("已更新基本工资", "ok"); })
-        .catch(function (err) { toast(err.message, "err"); });
+      var id = inp.getAttribute("data-base");
+      var key = "base:" + id;
+      var value = inp.value;
+      ui.employees.forEach(function (e) {
+        if (e.id === id) { e.monthBase = Number(value) || 0; e.defaultBase = Number(value) || 0; }
+      });
+      setFieldSaveState(key, "saving", "保存中…");
+      inp.disabled = true;
+      run("adminUpdateEmployee", getToken(), id, {
+        month: ui.month, monthBase: value, defaultBase: value
+      }).then(function () {
+        inp.disabled = false;
+        setFieldSaveState(key, "saved", "已保存 ✓");
+        toast("已更新基本工资", "ok");
+        setTimeout(function () { setFieldSaveState(key, "", ""); }, 2000);
+      }).catch(function (err) {
+        inp.disabled = false;
+        setFieldSaveState(key, "error", "失败");
+        toast(err.message, "err");
+      });
     });
   });
   Array.prototype.forEach.call(document.querySelectorAll("[data-note]"), function (inp) {
     inp.addEventListener("change", function () {
-      run("adminUpdateEmployee", getToken(), inp.getAttribute("data-note"), { note: inp.value })
-        .catch(function (err) { toast(err.message, "err"); });
+      var id = inp.getAttribute("data-note");
+      var key = "note:" + id;
+      var value = inp.value;
+      ui.employees.forEach(function (e) { if (e.id === id) e.note = value; });
+      setFieldSaveState(key, "saving", "保存中…");
+      inp.disabled = true;
+      run("adminUpdateEmployee", getToken(), id, { note: value })
+        .then(function () {
+          inp.disabled = false;
+          setFieldSaveState(key, "saved", "已保存 ✓");
+          toast("备注已保存", "ok");
+          setTimeout(function () { setFieldSaveState(key, "", ""); }, 2000);
+        })
+        .catch(function (err) {
+          inp.disabled = false;
+          setFieldSaveState(key, "error", "失败");
+          toast(err.message, "err");
+        });
     });
   });
   Array.prototype.forEach.call(document.querySelectorAll("[data-del-emp]"), function (b) {
@@ -366,10 +536,16 @@ function bindAdmin() {
       ui.employees.forEach(function (e) { if (e.id === id) emp = e; });
       if (!emp) return;
       if (!confirm("确定删除员工「" + emp.name + "」？其历史申请仍会保留，但不再出现在结算表中。")) return;
-      run("adminDeleteEmployee", getToken(), id).then(function () {
-        toast("已删除", "ok");
-        return loadAll();
-      }).then(render).catch(function (err) { toast(err.message, "err"); });
+      withButtonBusy(b, "删除中…", function () {
+        return run("adminDeleteEmployee", getToken(), id).then(function () {
+          toast("已删除", "ok");
+          ui.employees = ui.employees.filter(function (e) { return e.id !== id; });
+          render();
+          return loadAll();
+        });
+      }).then(function () {
+        render();
+      }).catch(function (err) { toast(err.message, "err"); });
     });
   });
   var addEmp = document.getElementById("add-emp");
@@ -377,16 +553,20 @@ function bindAdmin() {
     var name = (prompt("新员工姓名：") || "").trim();
     if (!name) return;
     var base = Number(prompt("月基本工资（欧元）：", "0") || "0");
-    run("adminAddEmployee", getToken(), { name: name, defaultBase: base, month: ui.month }).then(function () {
-      toast("已添加 " + name, "ok");
-      return loadEmployees();
+    withButtonBusy(addEmp, "添加中…", function () {
+      return run("adminAddEmployee", getToken(), { name: name, defaultBase: base, month: ui.month }).then(function () {
+        toast("已添加 " + name, "ok");
+        return loadAll();
+      });
     }).then(render).catch(function (err) { toast(err.message, "err"); });
   });
   var copyPrev = document.getElementById("copy-prev");
   if (copyPrev) copyPrev.addEventListener("click", function () {
-    run("adminCopyPreviousBases", getToken(), ui.month).then(function (r) {
-      toast(r.sourceMonth ? "已从 " + r.sourceMonth + " 复制基本工资" : "没有可复制的上月数据，已使用默认基本工资", r.sourceMonth ? "ok" : "err");
-      return loadEmployees();
+    withButtonBusy(copyPrev, "复制中…", function () {
+      return run("adminCopyPreviousBases", getToken(), ui.month).then(function (r) {
+        toast(r.sourceMonth ? "已从 " + r.sourceMonth + " 复制基本工资" : "没有可复制的上月数据，已使用默认基本工资", r.sourceMonth ? "ok" : "err");
+        return loadAll();
+      });
     }).then(render).catch(function (err) { toast(err.message, "err"); });
   });
   var csvArea = document.getElementById("csv-paste");
@@ -395,18 +575,22 @@ function bindAdmin() {
   if (importCsv) importCsv.addEventListener("click", function () {
     var text = (document.getElementById("csv-paste").value || "").trim();
     if (!text) { toast("请先粘贴 CSV", "err"); return; }
-    run("adminImportCsvBases", getToken(), ui.month, text).then(function (r) {
-      toast("已更新 " + r.updated + " 人，新增 " + r.added + " 人", "ok");
-      ui.csvDraft = "";
-      return loadEmployees();
+    withButtonBusy(importCsv, "导入中…", function () {
+      return run("adminImportCsvBases", getToken(), ui.month, text).then(function (r) {
+        toast("已更新 " + r.updated + " 人，新增 " + r.added + " 人", "ok");
+        ui.csvDraft = "";
+        return loadAll();
+      });
     }).then(render).catch(function (err) { toast(err.message, "err"); });
   });
 
   var exportJson = document.getElementById("export-json");
   if (exportJson) exportJson.addEventListener("click", function () {
-    run("adminExportBackup", getToken()).then(function (data) {
-      downloadText("FEST7-payroll-backup.json", JSON.stringify(data, null, 2), "application/json;charset=utf-8");
-      toast("已导出 JSON", "ok");
+    withButtonBusy(exportJson, "导出中…", function () {
+      return run("adminExportBackup", getToken()).then(function (data) {
+        downloadText("FEST7-payroll-backup.json", JSON.stringify(data, null, 2), "application/json;charset=utf-8");
+        toast("已导出 JSON", "ok");
+      });
     }).catch(function (err) { toast(err.message, "err"); });
   });
   var importJson = document.getElementById("import-json");
@@ -421,9 +605,11 @@ function bindAdmin() {
         try {
           var parsed = JSON.parse(String(reader.result || ""));
           if (!confirm("导入将覆盖当前全部业务数据，确定继续？")) return;
-          run("adminImportBackup", getToken(), parsed).then(function () {
-            toast("导入成功", "ok");
-            return loadAll();
+          withButtonBusy(importJson, "导入中…", function () {
+            return run("adminImportBackup", getToken(), parsed).then(function () {
+              toast("导入成功", "ok");
+              return loadAll();
+            });
           }).then(render).catch(function (err) { toast(err.message, "err"); });
         } catch (err) {
           toast(err.message || "导入失败", "err");
@@ -436,39 +622,69 @@ function bindAdmin() {
   var pwForm = document.getElementById("pw-form");
   if (pwForm) pwForm.addEventListener("submit", function (e) {
     e.preventDefault();
-    run("adminChangePassword", getToken(), pwForm.querySelector("[name=old]").value, pwForm.querySelector("[name=nw]").value)
-      .then(function () { toast("密码已更新", "ok"); pwForm.reset(); })
-      .catch(function (err) { toast(err.message, "err"); });
+    var btn = pwForm.querySelector('button[type="submit"]');
+    withButtonBusy(btn, "保存中…", function () {
+      return run("adminChangePassword", getToken(), pwForm.querySelector("[name=old]").value, pwForm.querySelector("[name=nw]").value)
+        .then(function () { toast("密码已更新", "ok"); pwForm.reset(); });
+    }).catch(function (err) { toast(err.message, "err"); });
   });
   var logout = document.getElementById("logout");
   if (logout) logout.addEventListener("click", function () {
-    run("adminLogout", getToken()).then(function () {
+    withButtonBusy(logout, "退出中…", function () {
+      return run("adminLogout", getToken()).then(function () {
+        setToken("");
+        clearBootstrapCache();
+        ui.authed = false;
+        ui.settlement = null;
+        ui.submissions = [];
+        ui.employees = [];
+        render();
+      });
+    }).catch(function () {
       setToken("");
+      clearBootstrapCache();
       ui.authed = false;
       render();
     });
   });
 }
 
-function setStatus(id, status) {
-  run("adminUpdateSubmission", getToken(), id, { status: status }).then(function () {
-    toast(status === "approved" ? "已通过" : "已驳回", "ok");
-    return loadAll();
-  }).then(render).catch(function (err) { toast(err.message, "err"); });
+function setStatus(id, status, btn) {
+  withButtonBusy(btn, status === "approved" ? "通过中…" : "驳回中…", function () {
+    return run("adminUpdateSubmission", getToken(), id, { status: status }).then(function (res) {
+      var next = res && res.submission ? res.submission : null;
+      ui.submissions = ui.submissions.map(function (s) {
+        if (s.id !== id) return s;
+        return next || Object.assign({}, s, { status: status, reviewedAt: s.reviewedAt });
+      });
+      toast(status === "approved" ? "已通过" : "已驳回", "ok");
+      render();
+      return loadAll();
+    });
+  }).then(function () {
+    renderIfIdle();
+  }).catch(function (err) { toast(err.message, "err"); });
 }
 
-function deleteSubmission(id) {
+function deleteSubmission(id, btn) {
   if (!confirm("确定删除这条申请？此操作不可撤销。")) return;
-  run("adminDeleteSubmission", getToken(), id).then(function () {
-    toast("已删除", "ok");
-    if (ui.editing && ui.editing.id === id) ui.editing = null;
-    return loadAll();
-  }).then(render).catch(function (err) { toast(err.message, "err"); });
+  withButtonBusy(btn, "删除中…", function () {
+    return run("adminDeleteSubmission", getToken(), id).then(function () {
+      toast("已删除", "ok");
+      if (ui.editing && ui.editing.id === id) ui.editing = null;
+      ui.submissions = ui.submissions.filter(function (s) { return s.id !== id; });
+      render();
+      return loadAll();
+    });
+  }).then(function () {
+    renderIfIdle();
+  }).catch(function (err) { toast(err.message, "err"); });
 }
 
 function onSaveEdit(e) {
   e.preventDefault();
   var form = e.target;
+  var btn = form.querySelector('button[type="submit"]');
   var body = {
     employeeId: form.querySelector("[name=employeeId]").value,
     type: form.querySelector("[name=type]").value,
@@ -488,19 +704,59 @@ function onSaveEdit(e) {
       body.hoursMode = "direct";
     }
   }
-  run("adminUpdateSubmission", getToken(), ui.editing.id, body).then(function () {
-    toast("已保存", "ok");
-    ui.editing = null;
-    return loadAll();
-  }).then(render).catch(function (err) { toast(err.message, "err"); });
+  withButtonBusy(btn, "保存中…", function () {
+    return run("adminUpdateSubmission", getToken(), ui.editing.id, body).then(function () {
+      toast("已保存", "ok");
+      ui.editing = null;
+      render();
+      return loadAll();
+    });
+  }).then(function () {
+    renderIfIdle();
+  }).catch(function (err) { toast(err.message, "err"); });
 }
 
 function boot() {
-  showLoading("app", "正在加载…");
-  refreshMe().then(function () {
-    if (ui.authed) return loadAll();
-  }).then(render).catch(function (err) {
-    showLoadError("app", err.message || "无法连接服务器", boot);
+  warmupApi();
+  var token = getToken();
+  if (!token) {
+    ui.authed = false;
+    render();
+    return;
+  }
+  var cached = readBootstrapCache(ui.month);
+  if (cached) {
+    ui.authed = true;
+    applyBootstrap(cached);
+    ui.refreshing = true;
+    render();
+  } else {
+    showLoading("app", "正在加载…");
+  }
+  run("adminMe", token).then(function (me) {
+    ui.authed = !!me.authenticated;
+    if (!ui.authed) {
+      setToken("");
+      ui.refreshing = false;
+      render();
+      return;
+    }
+    ui.refreshing = true;
+    setRefreshing(true);
+    return loadAll();
+  }).then(function () {
+    if (!ui.authed) return;
+    ui.refreshing = false;
+    render();
+  }).catch(function (err) {
+    ui.refreshing = false;
+    setRefreshing(false);
+    if (ui.settlement || ui.employees.length) {
+      toast(err.message || "刷新失败，先显示本地缓存", "err");
+      render();
+    } else {
+      showLoadError("app", err.message || "无法连接服务器", boot);
+    }
   });
 }
 boot();

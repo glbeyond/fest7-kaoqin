@@ -1,13 +1,97 @@
-var state = { employees: [], type: "leave", hoursMode: "range", otherName: false };
+var EMP_CACHE_KEY = "fest7_employees_cache";
+
+var state = {
+  employees: [],
+  type: "leave",
+  hoursMode: "range",
+  otherName: false,
+  submitting: false,
+  justSubmitted: null,
+  refreshing: false
+};
+
+function readEmpCache() {
+  try {
+    var parsed = JSON.parse(localStorage.getItem(EMP_CACHE_KEY) || "null");
+    return parsed && parsed.employees ? parsed.employees : null;
+  } catch (err) {
+    return null;
+  }
+}
+
+function writeEmpCache(employees) {
+  try {
+    localStorage.setItem(EMP_CACHE_KEY, JSON.stringify({ employees: employees, at: Date.now() }));
+  } catch (err) { /* quota / private mode */ }
+}
+
+function sameEmployeeList(a, b) {
+  if (!a || !b || a.length !== b.length) return false;
+  var i;
+  for (i = 0; i < a.length; i++) {
+    if (a[i].id !== b[i].id || a[i].name !== b[i].name) return false;
+  }
+  return true;
+}
 
 function loadEmployees() {
   return run("getEmployees").then(function (data) {
     state.employees = data.employees || [];
+    writeEmpCache(state.employees);
+    return state.employees;
   });
 }
 
+function patchEmployeeSelect() {
+  var sel = document.querySelector("#submit-form [name=employeeId]");
+  if (!sel) return false;
+  var current = sel.value;
+  var names = state.employees.map(function (e) {
+    return '<option value="' + esc(e.id) + '">' + esc(e.name) + "</option>";
+  }).join("");
+  sel.innerHTML = '<option value="" disabled>请选择</option>' + names + '<option value="__other__">其他（手填姓名）</option>';
+  var found = false;
+  var i;
+  for (i = 0; i < sel.options.length; i++) {
+    if (sel.options[i].value === current) { found = true; break; }
+  }
+  if (found && current) sel.value = current;
+  else {
+    sel.value = "";
+    sel.options[0].selected = true;
+  }
+  return true;
+}
+
 function render() {
+  setRefreshing(!!state.refreshing);
   var app = document.getElementById("app");
+  if (state.justSubmitted) {
+    var n = state.justSubmitted.count || 1;
+    var label = TYPE_LABEL[state.justSubmitted.type] || "申请";
+    app.innerHTML =
+      '<div class="page-intro"><h2>提交申请</h2><p>无需登录。填写姓名与申请内容后提交，等待管理后台审批通过后才会计入当月结算。</p></div>' +
+      '<div class="submit-layout"><div class="card card-pad success-panel" role="status">' +
+      '<div class="success-mark">✓</div>' +
+      "<h3>提交成功</h3>" +
+      "<p>" + (n > 1 ? "已提交 " + n + " 条" + label + "，" : "已提交 " + label + "，") +
+      "状态为「待审批」。通过后才会进入月度结算。</p>" +
+      '<button type="button" class="btn btn-primary" id="submit-again">再提交一笔</button>' +
+      "</div>" +
+      '<aside class="card side-help"><h3>规则说明</h3><ul>' +
+      "<li>工作日为周一至周五；若法定假日落在工作日，仍按普通工作日计算。</li>" +
+      "<li>标准工时：08:45–13:00、14:00–18:15，每天 8.5 小时。</li>" +
+      "<li>小时费率 = 月基本工资 ÷（当月工作日数 × 8.5）。</li>" +
+      "<li>请假按小时费率扣款；加班一律按小时费率 × 1.2 计发（含周末与工作时段外）。</li>" +
+      "<li>自定义可正可负：垫付报销、临时补贴为正；扣款为负。</li>" +
+      "</ul></aside></div>";
+    document.getElementById("submit-again").addEventListener("click", function () {
+      state.justSubmitted = null;
+      render();
+    });
+    return;
+  }
+
   var f = state;
   var names = f.employees.map(function (e) {
     return '<option value="' + esc(e.id) + '">' + esc(e.name) + "</option>";
@@ -67,7 +151,9 @@ function render() {
   }
 
   app.innerHTML =
-    '<div class="page-intro"><h2>提交申请</h2><p>无需登录。填写姓名与申请内容后提交，等待管理后台审批通过后才会计入当月结算。</p></div>' +
+    '<div class="page-intro"><h2>提交申请' +
+    (f.refreshing ? '<span class="sync-indicator"><span class="sync-dot"></span>更新中…</span>' : "") +
+    "</h2><p>无需登录。填写姓名与申请内容后提交，等待管理后台审批通过后才会计入当月结算。</p></div>" +
     '<div class="submit-layout"><form class="card card-pad stack" id="submit-form">' +
     '<div class="seg" id="type-seg">' + typeBtns + "</div>" +
     '<label class="field">申请人姓名' +
@@ -78,7 +164,7 @@ function render() {
     body +
     '<button type="submit" class="btn btn-primary btn-block">提交申请</button>' +
     '<p class="tiny">提交后状态为「待审批」，通过后才会进入月度结算。</p>' +
-    '</form>' +
+    "</form>" +
     '<aside class="card side-help"><h3>规则说明</h3><ul>' +
     "<li>工作日为周一至周五；若法定假日落在工作日，仍按普通工作日计算。</li>" +
     "<li>标准工时：08:45–13:00、14:00–18:15，每天 8.5 小时。</li>" +
@@ -133,6 +219,7 @@ function bind() {
   var form = document.getElementById("submit-form");
   Array.prototype.forEach.call(document.querySelectorAll("#type-seg button"), function (b) {
     b.addEventListener("click", function () {
+      if (state.submitting) return;
       state.type = b.getAttribute("data-type");
       if (state.type !== "leave" && state.hoursMode === "multi-day") state.hoursMode = "range";
       render();
@@ -140,6 +227,7 @@ function bind() {
   });
   Array.prototype.forEach.call(document.querySelectorAll("#hours-mode button"), function (b) {
     b.addEventListener("click", function () {
+      if (state.submitting) return;
       state.hoursMode = b.getAttribute("data-mode");
       render();
     });
@@ -170,6 +258,7 @@ function bind() {
   refreshPreview(form);
   form.addEventListener("submit", function (e) {
     e.preventDefault();
+    if (state.submitting) return;
     var payload = { type: state.type, hoursMode: state.hoursMode };
     if (state.otherName) payload.employeeName = form.querySelector("[name=employeeName]").value.trim();
     else payload.employeeId = form.querySelector("[name=employeeId]").value;
@@ -187,22 +276,58 @@ function bind() {
       payload.hours = Number(form.querySelector("[name=hours]").value);
     }
     var btn = form.querySelector('button[type="submit"]');
-    btn.disabled = true;
-    run("submitApplication", payload).then(function (result) {
-      var n = result.count || (result.submissions && result.submissions.length) || 1;
-      toast(n > 1 ? "已提交 " + n + " 条请假，等待审批" : "已提交，等待审批", "ok");
-      render();
+    state.submitting = true;
+    withButtonBusy(btn, "提交中…", function () {
+      return run("submitApplication", payload).then(function (result) {
+        var n = result.count || (result.submissions && result.submissions.length) || 1;
+        state.justSubmitted = { count: n, type: state.type };
+        toast(n > 1 ? "已提交 " + n + " 条请假，等待审批" : "已提交，等待审批", "ok");
+        state.submitting = false;
+        render();
+      });
     }).catch(function (err) {
+      state.submitting = false;
       toast(err.message, "err");
-      btn.disabled = false;
     });
   });
 }
 
 function boot() {
-  showLoading("app", "正在加载员工名单…");
-  loadEmployees().then(render).catch(function (err) {
-    showLoadError("app", err.message || "无法连接服务器", boot);
+  warmupApi();
+  var cached = readEmpCache();
+  if (cached && cached.length) {
+    state.employees = cached;
+    state.refreshing = true;
+    render();
+  } else {
+    showLoading("app", "正在加载员工名单…");
+  }
+  var previous = cached ? cached.slice() : [];
+  loadEmployees().then(function () {
+    var wasRefreshing = state.refreshing;
+    state.refreshing = false;
+    setRefreshing(false);
+    if (!cached || !cached.length || !document.getElementById("submit-form")) {
+      render();
+      return;
+    }
+    if (!sameEmployeeList(previous, state.employees)) {
+      if (isFormFieldFocused() || state.submitting) patchEmployeeSelect();
+      else render();
+      return;
+    }
+    var ind = document.querySelector(".page-intro .sync-indicator");
+    if (ind) ind.remove();
+  }).catch(function (err) {
+    state.refreshing = false;
+    setRefreshing(false);
+    if (state.employees.length) {
+      toast(err.message || "名单刷新失败，先使用本地缓存", "err");
+      var ind = document.querySelector(".page-intro .sync-indicator");
+      if (ind) ind.remove();
+    } else {
+      showLoadError("app", err.message || "无法连接服务器", boot);
+    }
   });
 }
 boot();

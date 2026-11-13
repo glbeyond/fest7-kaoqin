@@ -24,6 +24,7 @@
     </nav>
   </div>
 </header>
+<div class="sync-bar" aria-hidden="true"></div>
 <main class="wrap" id="app">
   <div class="page-intro">
     <h2>提交申请</h2>
@@ -31,7 +32,7 @@
   </div>
   <div class="card card-pad"><p class="muted" style="margin:0">正在加载…</p></div>
 </main>
-<div class="toast-wrap" id="toasts"></div>
+<div class="toast-wrap" id="toasts" aria-live="polite" aria-relevant="additions"></div>
 <footer class="note" style="padding-bottom:32px">FEST7 考勤工资结算 · 提交后需管理后台审批通过才会计入当月结算。</footer>
 <script src="config.js"></script>
 <script src="utils.js"></script>

@@ -38,3 +38,14 @@ function run(name) {
     throw err instanceof Error ? err : new Error(String(err));
   });
 }
+
+/** 轻量 GET 预热，减少随后第一次 POST 的冷启动等待。失败可忽略。 */
+function warmupApi() {
+  if (!API_URL) return;
+  var sep = API_URL.indexOf("?") >= 0 ? "&" : "?";
+  fetch(API_URL + sep + "api=1", {
+    method: "GET",
+    credentials: "omit",
+    redirect: "follow"
+  }).catch(function () {});
+}
