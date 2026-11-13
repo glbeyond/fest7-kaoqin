@@ -1,6 +1,6 @@
 {
-  "name": "FEST7-请假-加班管理 后台",
-  "short_name": "FEST7-请假-加班管理 后台",
+  "name": "FEST7 月结助手 后台",
+  "short_name": "FEST7 月结助手 后台",
   "description": "FEST7 考勤审批与月度工资结算管理后台",
   "start_url": "./admin.html",
   "scope": "./",
