@@ -10,3 +10,15 @@
 4. 员工打开 `index.html`，管理员打开 `admin.html`。
 
 请勿把后台密码写进本仓库。初始密码为 `admin`，登录后请立即修改。
+
+## 安装到手机桌面（PWA）
+
+本目录已作为可安装的网页应用：员工页与管理后台各有一份 manifest。在 Android Chrome 中可通过「安装到桌面」提示添加；在 iOS Safari 中通过分享按钮选择「添加到主屏幕」。
+
+图标由仓库根目录的 `make-icons.sh` 根据 `logo.png`（或你提供的源图）生成。更换 Logo 后在本目录执行：
+
+```bash
+./make-icons.sh /path/to/new-logo.png
+```
+
+源图会被复制为 `logo.png`，并重新输出 `icon-*.png`、`admin-icon-*.png`、`apple-touch-icon.png`、`favicon-32.png`。

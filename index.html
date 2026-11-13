@@ -4,9 +4,17 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="color-scheme" content="light">
+<meta name="theme-color" content="#CC1D6A">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="考勤提交">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="favicon-32.png" type="image/png" sizes="32x32">
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
 <title>FEST7 考勤工资结算 · 提交申请</title>
-<link rel="stylesheet" href="app.css">
+<link rel="stylesheet" href="app.css?v=5">
 </head>
 <body>
 <header class="app-header">
@@ -34,9 +42,15 @@
 </main>
 <div class="toast-wrap" id="toasts" aria-live="polite" aria-relevant="additions"></div>
 <footer class="note" style="padding-bottom:32px">FEST7 考勤工资结算 · 提交后需管理后台审批通过才会计入当月结算。</footer>
-<script src="config.js"></script>
-<script src="utils.js"></script>
-<script src="api.js"></script>
-<script src="submit.js"></script>
+<script src="config.js?v=5"></script>
+<script src="utils.js?v=5"></script>
+<script src="api.js?v=5"></script>
+<script src="submit.js?v=5"></script>
+<div class="pwa-hint" id="pwa-hint" hidden>
+  <p class="pwa-hint-text">安装到桌面，打开更方便。</p>
+  <button type="button" class="btn btn-primary btn-sm" id="pwa-install">安装到桌面</button>
+  <button type="button" class="btn btn-ghost btn-sm" id="pwa-dismiss" aria-label="关闭">关闭</button>
+</div>
+<script src="pwa.js?v=5"></script>
 </body>
 </html>

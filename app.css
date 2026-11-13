@@ -412,3 +412,27 @@ body.is-refreshing .sync-bar { display: block; }
 }
 .success-panel h3 { margin: 0 0 8px; font-size: 20px; }
 .success-panel p { margin: 0 0 18px; color: var(--ink-2); }
+
+/* ----- v5: PWA install hint ----- */
+.pwa-hint {
+  position: fixed;
+  left: 12px;
+  right: 12px;
+  bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+  z-index: 70;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  box-shadow: var(--shadow-lg);
+  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+.pwa-hint[hidden] { display: none !important; }
+.pwa-hint-text { margin: 0; flex: 1; color: var(--ink-2); font-weight: 600; line-height: 1.4; }
+.pwa-hint .btn { flex: 0 0 auto; white-space: nowrap; }
+@media (max-width: 640px) {
+  .pwa-hint { padding: 10px 10px; }
+}

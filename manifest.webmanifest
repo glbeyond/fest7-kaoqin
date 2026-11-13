@@ -1,0 +1,32 @@
+{
+  "name": "FEST7 考勤提交",
+  "short_name": "考勤提交",
+  "description": "FEST7 员工请假、加班与自定义申请提交",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "lang": "zh-CN",
+  "dir": "ltr",
+  "theme_color": "#CC1D6A",
+  "background_color": "#CC1D6A",
+  "icons": [
+    {
+      "src": "./icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "./icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "./icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}
