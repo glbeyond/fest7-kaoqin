@@ -1,7 +1,16 @@
 (function () {
   if ("serviceWorker" in navigator) {
     window.addEventListener("load", function () {
-      navigator.serviceWorker.register("./sw.js").catch(function () { /* 离线或无权限时忽略 */ });
+      var hadController = !!navigator.serviceWorker.controller;
+      var reloaded = false;
+      navigator.serviceWorker.addEventListener("controllerchange", function () {
+        if (!hadController || reloaded) return;
+        reloaded = true;
+        window.location.reload();
+      });
+      navigator.serviceWorker.register("./sw.js", { updateViaCache: "none" }).then(function (reg) {
+        if (reg && reg.update) reg.update();
+      }).catch(function () { /* 离线或无权限时忽略 */ });
     });
   }
 
