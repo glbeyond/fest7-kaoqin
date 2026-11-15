@@ -1,0 +1,157 @@
+/* 自托管 Inter（拉丁子集 + €/−/–/→ 等，含 tnum 等宽数字；可变字重 400–800）。中文回落系统黑体。 */
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 400 800;
+  font-display: swap;
+  src: url("fonts/inter-latin.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+2010-2027, U+2030-203A, U+20AC, U+2116, U+2122, U+2190-2193, U+2212, U+2215, U+2264-2265, U+221E;
+}
+/* =====================================================================
+   FEST7 月结助手 · Design Tokens  V1.0
+   ---------------------------------------------------------------------
+   单一来源：所有页面（index.html / admin.html / 确认单打印）共用。
+   规则：组件样式只引用语义变量（--color-*, --space-*, --radius-* ...），
+         不直接写色值；原始色阶（--f7-*, --n-*）只在本文件内被引用。
+   ===================================================================== */
+:root {
+  /* ---------- 1. 原始色阶 Primitive ---------- */
+  /* 品牌 Magenta（取自 FEST7 Logo 实测底色 #CC1D6A） */
+  --f7-50:  #FDF2F7;
+  --f7-100: #FCE4EF;
+  --f7-200: #F9C6DC;
+  --f7-300: #F39BC0;
+  --f7-400: #E8629A;
+  --f7-500: #DA3A7E;
+  --f7-600: #CC1D6A;   /* Primary */
+  --f7-700: #A51656;   /* Primary Dark */
+  --f7-800: #821347;
+  --f7-900: #5E0F34;
+
+  /* 中性灰（Slate/Gray 混合，偏冷，配合玫红更干净） */
+  --n-0:   #FFFFFF;
+  --n-25:  #FCFCFD;
+  --n-50:  #F8FAFC;   /* 页面背景 */
+  --n-100: #F1F5F9;
+  --n-150: #EBEFF4;
+  --n-200: #E5E7EB;   /* 边框 */
+  --n-300: #D1D5DB;
+  --n-400: #94A3B8;   /* 辅助（仅图标/禁用/占位符，不作正文） */
+  --n-500: #6B7280;   /* 次级文字 */
+  --n-600: #4B5563;
+  --n-700: #374151;
+  --n-800: #1F2937;   /* 主文字 */
+  --n-900: #111827;
+
+  /* 语义色阶 */
+  --green-50: #ECFDF3;  --green-100: #D1FADF; --green-500: #22C55E; --green-600: #16A34A; --green-700: #15803D; --green-800: #166534;
+  --amber-50: #FFFBEB;  --amber-100: #FEF3C7; --amber-500: #F59E0B; --amber-600: #D97706; --amber-700: #B45309; --amber-800: #92400E;
+  --red-50:   #FEF2F2;  --red-100:   #FEE2E2; --red-500:   #EF4444; --red-600:   #DC2626; --red-700:   #B91C1C; --red-800:   #991B1B;
+  --blue-50:  #EFF6FF;  --blue-100:  #DBEAFE; --blue-500:  #3B82F6; --blue-600:  #2563EB; --blue-700:  #1D4ED8; --blue-800:  #1E40AF;
+
+  /* ---------- 2. 语义颜色 Semantic ---------- */
+  --color-bg:            var(--n-50);
+  --color-surface:       var(--n-0);
+  --color-surface-2:     var(--n-25);   /* 表头、合计列底 */
+  --color-surface-sunk:  var(--n-100);  /* 分段控件槽、只读字段 */
+  --color-border:        var(--n-200);
+  --color-border-strong: var(--n-300);
+  --color-divider:       #EEF1F5;
+
+  --color-text:          var(--n-800);  /* 14.68:1 on #FFF */
+  --color-text-2:        var(--n-600);  /* 7.56:1  */
+  --color-text-3:        var(--n-500);  /* 4.83:1  —— 说明文字的下限 */
+  --color-text-placeholder: #7B8494;    /* 3.8:1，仅占位符；字段均有可见 label */
+  --color-text-disabled: var(--n-400);
+  --color-text-inverse:  var(--n-0);
+  --color-icon:          var(--n-500);
+
+  --color-primary:        var(--f7-600);  /* 白字 5.31:1 */
+  --color-primary-hover:  var(--f7-700);  /* 白字 7.37:1 */
+  --color-primary-press:  var(--f7-800);
+  --color-primary-soft:   var(--f7-50);
+  --color-primary-soft-2: var(--f7-100);
+  --color-primary-text:   var(--f7-700);  /* 品牌色文字（链接/选中），6.75:1 on f7-50 */
+  --color-focus-ring:     rgba(204, 29, 106, .32);
+
+  --color-success: var(--green-700); --color-success-bg: var(--green-50); --color-success-border: #A6E9C0; --color-success-solid: var(--green-700);
+  --color-warning: var(--amber-700); --color-warning-bg: var(--amber-50); --color-warning-border: #FCD98A; --color-warning-solid: var(--amber-500);
+  --color-danger:  var(--red-700);   --color-danger-bg:  var(--red-50);   --color-danger-border:  #FBC5C5; --color-danger-solid:  var(--red-600);
+  --color-info:    var(--blue-700);  --color-info-bg:    var(--blue-50);  --color-info-border:    #BFD6FB; --color-info-solid:    var(--blue-600);
+  --color-neutral-tag: var(--n-600); --color-neutral-tag-bg: var(--n-100);
+
+  /* 金额语义（财务）：负数=红 + “−”号；正向调整=绿 + “+”号；零值=灰色破折号 */
+  --color-amount-neg:  var(--red-700);
+  --color-amount-pos:  var(--green-700);
+  --color-amount-zero: var(--n-400);
+
+  /* 品牌渐变（只用于：员工端顶栏、侧栏品牌块、总览主卡的一条斜切边、App 图标） */
+  --grad-brand: linear-gradient(135deg, #D8287A 0%, var(--f7-600) 45%, var(--f7-700) 100%);
+  --grad-brand-soft: radial-gradient(520px 220px at 100% 0%, rgba(204,29,106,.10), transparent 70%);
+  --grad-page: radial-gradient(900px 360px at 0% -10%, rgba(204,29,106,.05), transparent 60%);
+
+  /* ---------- 3. 字体 Typography ---------- */
+  --font-sans: "Inter", "Inter var", -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto,
+               "PingFang SC", "Hiragino Sans GB", "Noto Sans SC", "Noto Sans CJK SC", "Source Han Sans SC",
+               "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif;
+  --font-num:  "Inter", "Inter var", -apple-system, "SF Pro Text", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "JetBrains Mono", "SF Mono", "Cascadia Mono", "Noto Sans Mono", ui-monospace, Menlo, Consolas, monospace;
+  --num-features: "tnum" 1, "lnum" 1;   /* 等宽（表格）数字 + 等高数字 */
+
+  --fs-11: 11px; --fs-12: 12px; --fs-13: 13px; --fs-14: 14px; --fs-15: 15px; --fs-16: 16px;
+  --fs-18: 18px; --fs-20: 20px; --fs-24: 24px; --fs-28: 28px; --fs-32: 32px; --fs-40: 40px;
+  --fw-regular: 400; --fw-medium: 500; --fw-semibold: 600; --fw-bold: 700;
+  --lh-tight: 1.2; --lh-snug: 1.35; --lh-normal: 1.5; --lh-relaxed: 1.65;
+  --ls-caps: .06em;     /* 小号大写标签 */
+  --ls-num-lg: -.02em;  /* 大号金额微收紧 */
+
+  /* ---------- 4. 间距 Spacing（4pt 基准，8pt 节奏） ---------- */
+  --space-0: 0; --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px; --space-5: 20px;
+  --space-6: 24px; --space-7: 28px; --space-8: 32px; --space-10: 40px; --space-12: 48px; --space-16: 64px;
+
+  /* ---------- 5. 圆角 Radius ---------- */
+  --radius-xs: 4px;   /* 表格内小标签、代码 */
+  --radius-sm: 6px;   /* 小按钮、复选框、表格内输入框 */
+  --radius-md: 10px;  /* 按钮、输入框、下拉 */
+  --radius-lg: 12px;  /* 普通卡片、表格容器 */
+  --radius-xl: 16px;  /* 主卡、弹窗、移动端卡片 */
+  --radius-2xl: 22px; /* 移动端底部弹层顶角 */
+  --radius-pill: 999px;
+  --slant: 34deg;     /* FEST7 斜切角：实测 Logo「Express」标签边与「7」字回声线约 34°，所有斜切元素共用 */
+  --italic: 12deg;    /* F7 字标斜体角 */
+
+  /* ---------- 6. 阴影 Elevation ---------- */
+  --shadow-xs: 0 1px 2px rgba(16, 24, 40, .05);
+  --shadow-sm: 0 1px 2px rgba(16, 24, 40, .04), 0 1px 3px rgba(16, 24, 40, .06);
+  --shadow-md: 0 2px 4px -2px rgba(16, 24, 40, .05), 0 6px 16px -4px rgba(16, 24, 40, .08);
+  --shadow-lg: 0 12px 32px -8px rgba(16, 24, 40, .18), 0 4px 8px -4px rgba(16, 24, 40, .06);
+  --shadow-brand: 0 1px 0 rgba(255,255,255,.22) inset, 0 6px 16px -6px rgba(204, 29, 106, .55);
+  --shadow-focus: 0 0 0 3px var(--color-focus-ring);
+  --shadow-sticky-x: 6px 0 8px -6px rgba(16, 24, 40, .12);
+
+  /* ---------- 7. 动效 Motion ---------- */
+  --dur-instant: 80ms;   /* 按压 */
+  --dur-fast: 140ms;     /* hover / 颜色 */
+  --dur-base: 200ms;     /* 展开、Tab 指示条 */
+  --dur-slow: 280ms;     /* 抽屉、底部弹层 */
+  --dur-count: 600ms;    /* 数字滚动 */
+  --ease-standard: cubic-bezier(.2, 0, 0, 1);
+  --ease-enter: cubic-bezier(0, 0, .2, 1);
+  --ease-exit: cubic-bezier(.4, 0, 1, 1);
+
+  /* ---------- 8. 布局 Layout ---------- */
+  --sidebar-w: 248px;
+  --sidebar-w-rail: 72px;
+  --topbar-h: 64px;
+  --content-max: 1320px;
+  --control-h: 40px;      /* 桌面输入框/按钮 */
+  --control-h-sm: 32px;
+  --control-h-touch: 48px;/* 移动端 */
+  --row-h: 44px;          /* 表格行（紧凑 40 / 舒适 48） */
+  --z-sticky: 10; --z-topbar: 40; --z-drawer: 60; --z-modal: 70; --z-toast: 90;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root { --dur-instant: 0ms; --dur-fast: 0ms; --dur-base: 0ms; --dur-slow: 0ms; --dur-count: 0ms; }
+  *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; scroll-behavior: auto !important; }
+}

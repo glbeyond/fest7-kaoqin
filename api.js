@@ -49,3 +49,30 @@ function warmupApi() {
     redirect: "follow"
   }).catch(function () {});
 }
+
+/**
+ * 页面关闭 / 切到后台时发送（撤销窗口内的待执行操作）。
+ * fetch keepalive 允许请求在页面卸载后继续完成；不等待结果。失败时退回 sendBeacon。
+ */
+function runKeepalive(name) {
+  var args = Array.prototype.slice.call(arguments, 1);
+  if (!API_URL) return false;
+  var body = JSON.stringify({ action: name, args: args });
+  try {
+    fetch(API_URL, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: body,
+      credentials: "omit",
+      redirect: "follow",
+      keepalive: true
+    }).catch(function () {});
+    return true;
+  } catch (err) {
+    try {
+      return navigator.sendBeacon(API_URL, new Blob([body], { type: "text/plain;charset=utf-8" }));
+    } catch (e) {
+      return false;
+    }
+  }
+}

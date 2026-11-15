@@ -8,49 +8,33 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="FEST7 月结助手">
-<link rel="manifest" href="manifest.webmanifest">
-<link rel="icon" href="favicon-32.png" type="image/png" sizes="32x32">
-<link rel="icon" href="favicon.svg" type="image/svg+xml">
-<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="apple-mobile-web-app-title" content="月结助手">
+<meta name="application-name" content="月结助手">
+<link rel="manifest" href="manifest.webmanifest?v=11">
+<link rel="icon" href="favicon-32.png?v=11" type="image/png" sizes="32x32">
+<link rel="icon" href="favicon.svg?v=11" type="image/svg+xml">
+<link rel="apple-touch-icon" href="apple-touch-icon.png?v=11">
+<link rel="preload" href="fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
 <title>FEST7 月结助手 · 提交申请</title>
-<link rel="stylesheet" href="app.css?v=7">
+<link rel="stylesheet" href="tokens.css?v=11">
+<link rel="stylesheet" href="app.css?v=11">
 </head>
-<body>
-<header class="app-header">
-  <div class="app-header-inner">
-    <div class="brand">
-      <div class="logo">F7</div>
-      <div>
-        <h1>FEST7 月结助手</h1>
-        <p>考勤申请 · 审批 · 月度工资结算（欧元）</p>
-      </div>
-    </div>
-    <nav class="nav">
-      <a href="index.html" class="active">员工提交</a>
-      <a href="admin.html">管理后台</a>
-    </nav>
-  </div>
-</header>
+<body class="emp-page">
 <div class="sync-bar" aria-hidden="true"></div>
-<main class="wrap" id="app">
-  <div class="page-intro">
-    <h2>提交申请</h2>
-    <p>无需登录。填写姓名与申请内容后提交，等待管理后台审批通过后才会计入当月结算。</p>
-  </div>
-  <div class="card card-pad"><p class="muted" style="margin:0">正在加载…</p></div>
+<main id="app">
+  <div class="emp-load"><div class="card" style="padding:16px"><p class="hint" style="margin:0">正在加载…</p></div></div>
 </main>
 <div class="toast-wrap" id="toasts" aria-live="polite" aria-relevant="additions"></div>
-<footer class="note" style="padding-bottom:32px">FEST7 月结助手 · 提交后需管理后台审批通过才会计入当月结算。</footer>
-<script src="config.js?v=7"></script>
-<script src="utils.js?v=7"></script>
-<script src="api.js?v=7"></script>
-<script src="submit.js?v=7"></script>
 <div class="pwa-hint" id="pwa-hint" hidden>
   <p class="pwa-hint-text">安装到桌面，打开更方便。</p>
-  <button type="button" class="btn btn-primary btn-sm" id="pwa-install">安装到桌面</button>
-  <button type="button" class="btn btn-ghost btn-sm" id="pwa-dismiss" aria-label="关闭">关闭</button>
+  <button type="button" class="btn btn-primary btn-sm" id="pwa-install">安装</button>
+  <button type="button" class="btn btn-ghost btn-sm btn-icon" id="pwa-dismiss" aria-label="关闭"><svg class="i i-sm" aria-hidden="true"><use href="#i-x"/></svg></button>
 </div>
-<script src="pwa.js?v=8"></script>
+<script src="config.js?v=11"></script>
+<script src="icons.js?v=11"></script>
+<script src="utils.js?v=11"></script>
+<script src="api.js?v=11"></script>
+<script src="submit.js?v=11"></script>
+<script src="pwa.js?v=11"></script>
 </body>
 </html>

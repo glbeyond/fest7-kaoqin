@@ -1,14 +1,14 @@
 {
-  "name": "FEST7 月结助手 后台",
-  "short_name": "FEST7 月结助手 后台",
+  "name": "FEST7 月结后台",
+  "short_name": "月结后台",
   "description": "FEST7 考勤审批与月度工资结算管理后台",
   "start_url": "./admin.html",
   "scope": "./",
   "display": "standalone",
   "lang": "zh-CN",
   "dir": "ltr",
-  "theme_color": "#CC1D6A",
-  "background_color": "#CC1D6A",
+  "theme_color": "#FFFFFF",
+  "background_color": "#1F2937",
   "icons": [
     {
       "src": "./admin-icon-192.png",

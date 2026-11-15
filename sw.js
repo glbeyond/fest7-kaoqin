@@ -1,32 +1,40 @@
-/* FEST7 考勤 PWA service worker.
+/* FEST7 考勤 PWA service worker（v11 · 界面 v2）.
  * 静态资源：cache-first，后台更新。
  * script.google.com API（含 POST）走网络，不写入缓存。
  */
-var CACHE_VER = "fest7-kaoqin-v10";
+var CACHE_VER = "fest7-kaoqin-v11-ui2";
+var V = "?v=11";
 var PRECACHE = [
   "./",
   "./index.html",
   "./admin.html",
-  "./app.css?v=7",
-  "./config.js?v=7",
-  "./utils.js?v=7",
-  "./api.js?v=7",
-  "./submit.js?v=7",
-  "./admin.js?v=7",
-  "./pwa.js?v=8",
-  "./manifest.webmanifest",
-  "./manifest-admin.webmanifest",
-  "./favicon.svg",
-  "./favicon-32.png",
+  "./tokens.css" + V,
+  "./app.css" + V,
+  "./config.js" + V,
+  "./icons.js" + V,
+  "./utils.js" + V,
+  "./api.js" + V,
+  "./submit.js" + V,
+  "./admin.js" + V,
+  "./pwa.js" + V,
+  "./fonts/inter-latin.woff2",
+  "./logo-white.png",
+  "./manifest.webmanifest" + V,
+  "./manifest-admin.webmanifest" + V,
+  "./favicon.svg" + V,
+  "./favicon-32.png" + V,
+  "./admin-favicon.svg" + V,
+  "./admin-favicon-32.png" + V,
+  "./apple-touch-icon.png" + V,
+  "./admin-apple-touch-icon.png" + V,
+  "./icon-192.png" + V,
+  "./admin-icon-192.png" + V,
   "./icon-192.png",
   "./icon-512.png",
   "./icon-maskable-512.png",
-  "./apple-touch-icon.png",
   "./admin-icon-192.png",
   "./admin-icon-512.png",
-  "./admin-icon-maskable-512.png",
-  "./admin-apple-touch-icon.png",
-  "./logo.png"
+  "./admin-icon-maskable-512.png"
 ];
 
 function isApiRequest(url) {
