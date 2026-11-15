@@ -19,7 +19,10 @@ var ui = {
   loginError: "",
   editing: null,
   refreshing: false,
-  pendingRender: false
+  pendingRender: false,
+  lock: null,
+  lockedMonths: [],
+  slip: null
 };
 
 function readBootstrapCache(month) {
@@ -47,7 +50,18 @@ function applyBootstrap(data) {
   ui.settlement = data.settlement || null;
   ui.submissions = (data.submissions && data.submissions.submissions) || data.submissions || [];
   ui.employees = (data.employees && data.employees.employees) || data.employees || [];
+  ui.lock = data.lock || null;
+  ui.lockedMonths = data.lockedMonths || [];
 }
+
+function monthOf(dateStr) { return String(dateStr || "").slice(0, 7); }
+
+function isMonthLocked(ym) {
+  if (ym === ui.month && ui.settlement && ui.settlement.locked) return true;
+  return (ui.lockedMonths || []).indexOf(ym) !== -1;
+}
+
+function empDisplayName(s) { return s.displayName || s.employeeName || ""; }
 
 function loadAll() {
   return run("adminBootstrap", getToken(), ui.month).then(function (data) {
@@ -115,8 +129,13 @@ function render() {
       '<label class="field">密码<input name="password" type="password" autocomplete="current-password" required></label>' +
       (ui.loginError ? '<p class="neg" style="margin:0">' + esc(ui.loginError) + "</p>" : "") +
       '<button type="submit" class="btn btn-navy btn-block">进入后台</button></form></div>' +
-      '<footer class="note">FEST7 考勤工资结算</footer>';
+      '<footer class="note">FEST7 月结助手</footer>';
     document.getElementById("login-form").addEventListener("submit", onLogin);
+    return;
+  }
+  if (ui.slip) {
+    app.innerHTML = renderSlips();
+    bindSlips();
     return;
   }
   var pending = pendingCount();
@@ -131,7 +150,7 @@ function render() {
   app.innerHTML =
     '<div class="page-intro"><h2>管理后台' + syncIndicatorHtml() + "</h2><p>审批员工申请，维护每月基本工资，并完成银行卡与现金的月度结算。</p></div>" +
     '<div class="tabs" id="admin-tabs">' + tabs + "</div>" + body +
-    '<footer class="note">FEST7 考勤工资结算 · 数据保存在本 Google 表格中。</footer>';
+    '<footer class="note">FEST7 月结助手 · 数据保存在本 Google 表格中。</footer>';
   bindAdmin();
 }
 
@@ -149,10 +168,16 @@ function renderSettle() {
     kpi("银行卡（打卡）", formatMoney(S.totals.bank), "需手动逐人填写") +
     kpi("现金应付", formatMoney(S.totals.cash), "应发合计 − 银行卡") +
     "</div>";
+  var locked = !!S.locked;
   var rows = S.rows.map(function (r) {
     var active = ui.selectedEmpId === r.emp.id ? " active" : "";
     var note = r.emp.note ? '<span class="note-dot" title="' + esc(r.emp.note) + '">*</span>' : "";
+    if (r.emp.active === false && !locked) note += ' <span class="badge badge-rejected">已停用</span>';
+    if (locked && r.emp.currentName && r.emp.currentName !== r.emp.name) note += ' <span class="tiny">（现名 ' + esc(r.emp.currentName) + "）</span>";
     var bankKey = "bank:" + r.emp.id;
+    var bankCell = locked
+      ? '<td class="num">' + formatMoney(r.bank) + "</td>"
+      : '<td class="num" onclick="event.stopPropagation()"><div class="input-with-state"><input class="bank" data-bank="' + esc(r.emp.id) + '" type="number" step="0.01" value="' + (r.bank ? String(r.bank) : "") + '" placeholder="0.00">' + saveStateHtml(bankKey) + "</div></td>";
     return "<tr class=\"" + active + "\" data-emp=\"" + esc(r.emp.id) + "\">" +
       '<td class="name-cell">' + esc(r.emp.name) + note + "</td>" +
       '<td class="num">' + formatMoney(r.base) + "</td>" +
@@ -163,7 +188,7 @@ function renderSettle() {
       '<td class="num' + (r.otPay ? " pos" : "") + '">' + (r.otPay ? formatMoney(r.otPay) : "—") + "</td>" +
       '<td class="num' + (r.customSum < 0 ? " neg" : r.customSum > 0 ? " pos" : "") + '">' + (r.customSum ? formatMoney(r.customSum) : "—") + "</td>" +
       '<td class="num"><strong>' + formatMoney(r.gross) + "</strong></td>" +
-      '<td class="num" onclick="event.stopPropagation()"><div class="input-with-state"><input class="bank" data-bank="' + esc(r.emp.id) + '" type="number" step="0.01" value="' + (r.bank ? String(r.bank) : "") + '" placeholder="0.00">' + saveStateHtml(bankKey) + "</div></td>" +
+      bankCell +
       '<td class="num' + (r.cash < 0 ? " neg" : "") + '">' + formatMoney(r.cash) + "</td></tr>";
   }).join("");
   var t = S.totals;
@@ -179,10 +204,17 @@ function renderSettle() {
     '<td class="num">' + formatMoney(t.cash) + "</td></tr>";
   var unmatched = S.unmatched && S.unmatched.length
     ? '<p class="neg">有 ' + S.unmatched.length + " 条已通过申请无法匹配到员工名单，未计入上表。</p>" : "";
+  var lockBanner = locked
+    ? '<div class="banner"><span><strong>' + esc(formatMonthCN(ui.month)) + "已锁定结算</strong>（" + esc(String(S.lockedAt || "").replace("T", " ").slice(0, 16)) +
+      "）。以下为锁定时保存的快照，审批、基本工资、银行卡和调整均不可修改。</span>" +
+      '<button type="button" class="btn btn-danger btn-sm" id="unlock-month">解锁</button></div>'
+    : "";
+  var lockBtn = locked ? "" : '<button type="button" class="btn btn-navy" id="lock-month">锁定结算</button>';
   return '<div class="toolbar">' +
     '<label class="field" style="min-width:180px">结算月份<input id="month-input" type="month" value="' + esc(ui.month) + '"></label>' +
-    '<div class="row"><button type="button" class="btn btn-ghost" id="export-csv">导出本月结算 CSV</button></div></div>' +
-    kpis + unmatched +
+    '<div class="row"><button type="button" class="btn btn-ghost" id="export-csv">导出本月结算 CSV</button>' +
+    '<button type="button" class="btn btn-ghost" id="print-all-slips">打印全部确认单</button>' + lockBtn + "</div></div>" +
+    lockBanner + kpis + unmatched +
     '<div class="table-wrap"><table class="data" id="settle-table"><thead><tr>' +
     "<th>姓名</th><th class=\"num\">基本工资</th><th class=\"num\">小时费率</th><th class=\"num\">请假(h)</th><th class=\"num\">请假扣款</th><th class=\"num\">加班(h)</th><th class=\"num\">加班费</th><th class=\"num\">自定义</th><th class=\"num\">应发合计</th><th class=\"num\">银行卡</th><th class=\"num\">现金应付</th>" +
     "</tr></thead><tbody>" + rows + "</tbody><tfoot>" + foot + "</tfoot></table></div>" +
@@ -190,7 +222,8 @@ function renderSettle() {
     "<code>小时费率</code> = 基本工资 ÷（工作日数 × 8.5）　显示为两位小数，扣款/加班费按未四舍五入的费率计算后再取整。<br>" +
     "<code>请假扣款</code> = 请假小时 × 小时费率　　<code>加班费</code> = 加班小时 × 小时费率 × 1.2（含周末及工作时段外）<br>" +
     "<code>应发合计</code> = 基本工资 − 请假扣款 + 加班费 + 自定义合计　　<code>现金应付</code> = 应发合计 − 银行卡金额<br>" +
-    "标准工作时段 08:45–13:00、14:00–18:15；" + formatMonthCN(ui.month) + "共 " + S.workdays + " 个工作日（周一至周五，假日不扣除）。点击员工行可查看并编辑已审批明细。带 * 的姓名表示有备注。</div>" +
+    "标准工作时段 08:45–13:00、14:00–18:15；" + formatMonthCN(ui.month) + "共 " + S.workdays + " 个工作日（周一至周五，假日不扣除）。点击员工行可查看" + (locked ? "明细和结算确认单" : "并编辑已审批明细，或打开结算确认单") + "。带 * 的姓名表示有备注。<br>" +
+    "<code>锁定结算</code> 会把本月每位员工的结果保存为快照；锁定后本月显示快照，不再随后续修改变化。如需更正，先解锁、修改，再重新锁定。</div>" +
     (ui.selectedEmpId ? renderDrawer(S) : "") +
     (ui.editing ? renderEditModal() : "");
 }
@@ -199,6 +232,7 @@ function renderDrawer(S) {
   var r = null;
   S.rows.forEach(function (x) { if (x.emp.id === ui.selectedEmpId) r = x; });
   if (!r) return "";
+  var locked = !!S.locked;
   var items = r.details.length ? r.details.map(function (d) {
     var time = d.hoursMode === "range" && d.startTime && d.endTime ? " · " + d.startTime + "–" + d.endTime : "";
     var hours = d.type !== "custom" ? " · " + formatHours(d.hours) + " 小时" : "";
@@ -206,9 +240,9 @@ function renderDrawer(S) {
       '<div class="tiny">' + esc(d.date) + time + hours + (d.note ? " · " + esc(d.note) : "") + "</div></div>" +
       "<div><div class=\"num " + (d.effect < 0 ? "neg" : d.effect > 0 ? "pos" : "") + '">' +
       (d.effect > 0 ? "+" : d.effect < 0 ? "−" : "") + formatMoney(Math.abs(d.effect)) + "</div>" +
-      '<div class="actions-row" style="justify-content:flex-end;margin-top:4px">' +
+      (locked ? "" : '<div class="actions-row" style="justify-content:flex-end;margin-top:4px">' +
       '<button type="button" class="btn btn-ghost btn-sm" data-edit="' + esc(d.id) + '">编辑</button>' +
-      '<button type="button" class="btn btn-danger btn-sm" data-del="' + esc(d.id) + '">删除</button></div></div></li>';
+      '<button type="button" class="btn btn-danger btn-sm" data-del="' + esc(d.id) + '">删除</button></div>') + "</div></li>";
   }).join("") : '<p class="empty">本月暂无已通过的请假、加班或自定义项。</p>';
   return '<div class="drawer-bg" id="drawer-bg"><div class="drawer">' +
     '<div class="row" style="justify-content:space-between"><h3>' + esc(r.emp.name) + " · " + formatMonthCN(ui.month) + " 明细</h3>" +
@@ -220,14 +254,20 @@ function renderDrawer(S) {
     '<div class="row" style="justify-content:space-between"><span>应发合计</span><strong class="num">' + formatMoney(r.gross) + "</strong></div>" +
     '<div class="row" style="justify-content:space-between"><span>银行卡</span><span class="num">' + formatMoney(r.bank) + "</span></div>" +
     '<div class="row" style="justify-content:space-between"><span>现金应付</span><strong class="num">' + formatMoney(r.cash) + "</strong></div>" +
-    "</div></div></div>";
+    "</div>" +
+    '<div class="actions-row"><button type="button" class="btn btn-primary btn-sm" id="open-slip" data-slip="' + esc(r.emp.id) + '">结算确认单</button>' +
+    (locked ? '<span class="tiny">本月已锁定，数据来自快照</span>' : "") + "</div>" +
+    "</div></div>";
 }
 
 function renderApprove() {
   var list = ui.submissions.slice();
   if (!list.length) return '<div class="card empty">暂无申请。</div>' + (ui.editing ? renderEditModal() : "");
   var cards = list.map(function (s) {
-    var actions = '<div class="actions-row">' +
+    var monthLocked = isMonthLocked(monthOf(s.date));
+    var actions = monthLocked
+      ? '<div class="actions-row"><span class="tiny">' + esc(formatMonthCN(monthOf(s.date))) + "已锁定结算，不可修改</span></div>"
+      : '<div class="actions-row">' +
       (s.status === "pending"
         ? '<button type="button" class="btn btn-forest btn-sm" data-approve="' + esc(s.id) + '">通过</button>' +
           '<button type="button" class="btn btn-danger btn-sm" data-reject="' + esc(s.id) + '">驳回</button>'
@@ -237,7 +277,9 @@ function renderApprove() {
     var detail = s.type === "custom"
       ? "金额 " + formatMoney(s.amount)
       : formatHours(s.hours) + " 小时" + (s.startTime && s.endTime ? "（" + esc(s.startTime) + "–" + esc(s.endTime) + "）" : "");
-    return '<div class="item-card"><div><div class="item-meta"><strong>' + esc(s.employeeName) + "</strong>" +
+    var nameExtra = s.employeeActive === false ? ' <span class="badge badge-rejected">已停用</span>' : "";
+    if (s.displayName && s.employeeName && s.displayName !== s.employeeName) nameExtra += ' <span class="tiny">（提交时：' + esc(s.employeeName) + "）</span>";
+    return '<div class="item-card"><div><div class="item-meta"><strong>' + esc(empDisplayName(s)) + "</strong>" + nameExtra +
       ' <span class="badge badge-' + s.status + '">' + STATUS_LABEL[s.status] + "</span>" +
       ' <span class="badge" style="background:#eee;color:#444">' + TYPE_LABEL[s.type] + "</span></div>" +
       "<div>" + esc(s.date) + " · " + detail + (s.note ? " · " + esc(s.note) : "") + "</div>" +
@@ -249,8 +291,10 @@ function renderApprove() {
 function renderEditModal() {
   var s = ui.editing;
   if (!s) return "";
-  var empOpts = ui.employees.map(function (e) {
-    return '<option value="' + esc(e.id) + '"' + (e.id === s.employeeId ? " selected" : "") + ">" + esc(e.name) + "</option>";
+  var empOpts = ui.employees.filter(function (e) {
+    return e.active !== false || e.id === s.employeeId;
+  }).map(function (e) {
+    return '<option value="' + esc(e.id) + '"' + (e.id === s.employeeId ? " selected" : "") + ">" + esc(e.name) + (e.active === false ? "（已停用）" : "") + "</option>";
   }).join("");
   var typeOpts = ["leave", "overtime", "custom"].map(function (t) {
     return '<option value="' + t + '"' + (s.type === t ? " selected" : "") + ">" + TYPE_LABEL[t] + "</option>";
@@ -279,23 +323,41 @@ function renderEditModal() {
 }
 
 function renderEmployees() {
-  var rows = ui.employees.map(function (e) {
+  var locked = isMonthLocked(ui.month);
+  var activeList = ui.employees.filter(function (e) { return e.active !== false; });
+  var inactiveList = ui.employees.filter(function (e) { return e.active === false; });
+  var rows = activeList.map(function (e) {
     var baseKey = "base:" + e.id;
     var noteKey = "note:" + e.id;
     return "<tr><td class=\"name-cell\">" + esc(e.name) + "</td>" +
-      '<td><div class="input-with-state"><input class="control" style="width:130px;padding:6px 8px" data-base="' + esc(e.id) + '" type="number" step="0.01" min="0" value="' + e.monthBase + '">' + saveStateHtml(baseKey) + "</div></td>" +
+      '<td><div class="input-with-state"><input class="control" style="width:130px;padding:6px 8px" data-base="' + esc(e.id) + '" type="number" step="0.01" min="0" value="' + e.monthBase + '"' + (locked ? " disabled title=\"本月已锁定结算\"" : "") + ">" + saveStateHtml(baseKey) + "</div></td>" +
       '<td><div class="input-with-state"><input class="control" style="min-width:220px;padding:6px 8px" data-note="' + esc(e.id) + '" value="' + esc(e.note || "") + '" placeholder="可选备注">' + saveStateHtml(noteKey) + "</div></td>" +
-      '<td><button type="button" class="btn btn-ghost btn-sm" data-del-emp="' + esc(e.id) + '">删除</button></td></tr>';
+      '<td><div class="actions-row"><button type="button" class="btn btn-ghost btn-sm" data-rename-emp="' + esc(e.id) + '">改名</button>' +
+      '<button type="button" class="btn btn-ghost btn-sm" data-deact-emp="' + esc(e.id) + '">停用</button></div></td></tr>';
   }).join("");
+  var inactiveRows = inactiveList.map(function (e) {
+    return "<tr><td class=\"name-cell\">" + esc(e.name) + ' <span class="badge badge-rejected">已停用</span></td>' +
+      '<td class="tiny">' + esc(String(e.deactivatedAt || "").replace("T", " ").slice(0, 16) || "—") + "</td>" +
+      "<td>" + esc(e.note || "") + "</td>" +
+      '<td><button type="button" class="btn btn-forest btn-sm" data-react-emp="' + esc(e.id) + '">恢复</button></td></tr>';
+  }).join("");
+  var inactiveBlock = inactiveList.length
+    ? '<div class="card card-pad" style="margin-top:16px"><h3 style="margin:0 0 8px;font-size:15px">已停用员工（' + inactiveList.length + "）</h3>" +
+      '<p class="muted" style="margin:0 0 10px;font-size:13px">停用后不再出现在员工提交页和新月份的结算表中；以前的工资、申请和付款记录全部保留，历史月份仍可查看。</p>' +
+      '<div class="table-wrap"><table class="data emp-table"><thead><tr><th>姓名</th><th>停用时间</th><th>备注</th><th></th></tr></thead><tbody>' + inactiveRows + "</tbody></table></div></div>"
+    : "";
   return '<div class="toolbar">' +
     '<label class="field" style="min-width:180px">工资所属月份<input id="emp-month" type="month" value="' + esc(ui.month) + '"></label>' +
-    '<div class="row"><button type="button" class="btn btn-ghost" id="copy-prev">从上月复制基本工资</button>' +
+    '<div class="row"><button type="button" class="btn btn-ghost" id="copy-prev"' + (locked ? " disabled" : "") + '>从上月复制基本工资</button>' +
     '<button type="button" class="btn btn-navy" id="add-emp">添加员工</button></div></div>' +
+    (locked ? '<div class="banner"><span>' + esc(formatMonthCN(ui.month)) + "已锁定结算，基本工资显示的是快照，不能修改。改名、备注不受影响。</span></div>" : "") +
     '<div class="table-wrap"><table class="data emp-table"><thead><tr><th>姓名</th><th>本月基本工资 (€)</th><th>备注</th><th></th></tr></thead><tbody>' + rows + "</tbody></table></div>" +
+    '<p class="tiny" style="margin:8px 2px 0">员工以内部编号关联工资、银行卡和申请记录，改名不会影响历史月份。</p>' +
+    inactiveBlock +
     '<div class="card card-pad" style="margin-top:16px"><h3 style="margin:0 0 8px;font-size:15px">导入本月基本工资</h3>' +
-    '<p class="muted" style="margin:0 0 10px;font-size:13px">粘贴 CSV，每行「姓名,基本工资」。将按姓名匹配已有员工；未匹配到的姓名会新增。</p>' +
+    '<p class="muted" style="margin:0 0 10px;font-size:13px">粘贴 CSV，每行「姓名,基本工资」。将按姓名匹配已有员工；未匹配到的姓名会新增；已停用员工会跳过。</p>' +
     '<textarea id="csv-paste" class="control" style="min-height:120px" placeholder="Tino,2400&#10;小杨,2200">' + esc(ui.csvDraft || "") + "</textarea>" +
-    '<div class="row" style="margin-top:10px"><button type="button" class="btn btn-primary" id="import-csv">导入到本月</button></div></div>';
+    '<div class="row" style="margin-top:10px"><button type="button" class="btn btn-primary" id="import-csv"' + (locked ? " disabled" : "") + ">导入到本月</button></div></div>";
 }
 
 function renderData() {
@@ -349,6 +411,7 @@ function onLogin(e) {
 function changeMonth(nextMonth, preferEmployeesTab) {
   ui.month = nextMonth || currentMonth();
   ui.selectedEmpId = null;
+  ui.slip = null;
   var cached = readBootstrapCache(ui.month);
   if (cached) applyBootstrap(cached);
   else ui.settlement = null;
@@ -381,6 +444,7 @@ function bindAdmin() {
   Array.prototype.forEach.call(document.querySelectorAll("#admin-tabs button"), function (b) {
     b.addEventListener("click", function () {
       ui.tab = b.getAttribute("data-tab");
+      ui.slip = null;
       ui.selectedEmpId = null;
       ui.editing = null;
       render();
@@ -438,6 +502,26 @@ function bindAdmin() {
         toast("已导出 CSV", "ok");
       });
     }).catch(function (err) { toast(err.message, "err"); });
+  });
+
+  var lockBtn = document.getElementById("lock-month");
+  if (lockBtn) lockBtn.addEventListener("click", function () { lockMonth(lockBtn); });
+  var unlockBtn = document.getElementById("unlock-month");
+  if (unlockBtn) unlockBtn.addEventListener("click", function () { unlockMonth(unlockBtn); });
+  var printAll = document.getElementById("print-all-slips");
+  if (printAll) printAll.addEventListener("click", function () {
+    if (!ui.settlement || !ui.settlement.rows.length) { toast("本月没有可打印的员工", "err"); return; }
+    ui.slip = { all: true };
+    ui.selectedEmpId = null;
+    render();
+    window.scrollTo(0, 0);
+  });
+  var openSlip = document.getElementById("open-slip");
+  if (openSlip) openSlip.addEventListener("click", function () {
+    ui.slip = { empId: openSlip.getAttribute("data-slip") };
+    ui.selectedEmpId = null;
+    render();
+    window.scrollTo(0, 0);
   });
 
   Array.prototype.forEach.call(document.querySelectorAll("[data-approve]"), function (b) {
@@ -529,23 +613,54 @@ function bindAdmin() {
         });
     });
   });
-  Array.prototype.forEach.call(document.querySelectorAll("[data-del-emp]"), function (b) {
+  Array.prototype.forEach.call(document.querySelectorAll("[data-deact-emp]"), function (b) {
     b.addEventListener("click", function () {
-      var id = b.getAttribute("data-del-emp");
-      var emp = null;
-      ui.employees.forEach(function (e) { if (e.id === id) emp = e; });
+      var id = b.getAttribute("data-deact-emp");
+      var emp = findEmp(id);
       if (!emp) return;
-      if (!confirm("确定删除员工「" + emp.name + "」？其历史申请仍会保留，但不再出现在结算表中。")) return;
-      withButtonBusy(b, "删除中…", function () {
-        return run("adminDeleteEmployee", getToken(), id).then(function () {
-          toast("已删除", "ok");
-          ui.employees = ui.employees.filter(function (e) { return e.id !== id; });
+      if (!confirm("确定停用员工「" + emp.name + "」？\n停用后不再出现在员工提交页和新月份结算中；以前的工资、申请和付款记录全部保留，可随时恢复。")) return;
+      withButtonBusy(b, "停用中…", function () {
+        return run("adminDeactivateEmployee", getToken(), id).then(function () {
+          toast("已停用 " + emp.name, "ok");
+          emp.active = false;
+          emp.deactivatedAt = new Date().toISOString().slice(0, 16);
           render();
           return loadAll();
         });
-      }).then(function () {
-        render();
-      }).catch(function (err) { toast(err.message, "err"); });
+      }).then(function () { renderIfIdle(); }).catch(function (err) { toast(err.message, "err"); });
+    });
+  });
+  Array.prototype.forEach.call(document.querySelectorAll("[data-react-emp]"), function (b) {
+    b.addEventListener("click", function () {
+      var id = b.getAttribute("data-react-emp");
+      var emp = findEmp(id);
+      if (!emp) return;
+      withButtonBusy(b, "恢复中…", function () {
+        return run("adminReactivateEmployee", getToken(), id).then(function () {
+          toast("已恢复 " + emp.name, "ok");
+          emp.active = true;
+          emp.deactivatedAt = "";
+          render();
+          return loadAll();
+        });
+      }).then(function () { renderIfIdle(); }).catch(function (err) { toast(err.message, "err"); });
+    });
+  });
+  Array.prototype.forEach.call(document.querySelectorAll("[data-rename-emp]"), function (b) {
+    b.addEventListener("click", function () {
+      var id = b.getAttribute("data-rename-emp");
+      var emp = findEmp(id);
+      if (!emp) return;
+      var name = (prompt("新的姓名（只改显示名，历史记录按员工编号关联，不受影响）：", emp.name) || "").trim();
+      if (!name || name === emp.name) return;
+      withButtonBusy(b, "保存中…", function () {
+        return run("adminUpdateEmployee", getToken(), id, { name: name }).then(function () {
+          toast("已改名为 " + name, "ok");
+          emp.name = name;
+          render();
+          return loadAll();
+        });
+      }).then(function () { renderIfIdle(); }).catch(function (err) { toast(err.message, "err"); });
     });
   });
   var addEmp = document.getElementById("add-emp");
@@ -635,6 +750,7 @@ function bindAdmin() {
         setToken("");
         clearBootstrapCache();
         ui.authed = false;
+        ui.slip = null;
         ui.settlement = null;
         ui.submissions = [];
         ui.employees = [];
@@ -647,6 +763,154 @@ function bindAdmin() {
       render();
     });
   });
+}
+
+function findEmp(id) {
+  var emp = null;
+  ui.employees.forEach(function (e) { if (e.id === id) emp = e; });
+  return emp;
+}
+
+function lockMonth(btn) {
+  var S = ui.settlement;
+  if (!S) return;
+  var month = ui.month;
+  var pending = ui.submissions.filter(function (s) { return s.status === "pending" && monthOf(s.date) === month; }).length;
+  var msg = "确定锁定 " + formatMonthCN(month) + " 的结算？\n\n锁定后会保存本月每位员工的结算快照（基本工资、请假、加班、调整、银行卡、现金）。" +
+    "此后本月的审批、基本工资、银行卡和调整都不能再修改，员工也不能再提交本月申请。";
+  if (pending) msg += "\n\n⚠ 本月还有 " + pending + " 条待审批申请，锁定后它们不会计入结算。";
+  if (S.unmatched && S.unmatched.length) msg += "\n⚠ 有 " + S.unmatched.length + " 条已通过申请无法匹配到员工，不会计入。";
+  if (!confirm(msg)) return;
+  withButtonBusy(btn, "锁定中…", function () {
+    return run("adminLockMonth", getToken(), month).then(function (res) {
+      if (ui.month === month && res && res.settlement) {
+        ui.settlement = res.settlement;
+        ui.lock = res.lock;
+        if (ui.lockedMonths.indexOf(month) === -1) ui.lockedMonths = ui.lockedMonths.concat([month]);
+      }
+      toast(formatMonthCN(month) + "已锁定结算", "ok");
+      render();
+      return loadAll();
+    });
+  }).then(function () { renderIfIdle(); }).catch(function (err) { toast(err.message, "err"); });
+}
+
+function unlockMonth(btn) {
+  var month = ui.month;
+  if (!confirm("确定解锁 " + formatMonthCN(month) + "？\n\n解锁后本月将重新按当前数据实时计算，可以再修改；已保存的快照仍保留在表格中作为记录。修改完成后请重新锁定。")) return;
+  var typed = prompt("请输入月份 " + month + " 以确认解锁：", "");
+  if (typed == null) return;
+  if (String(typed).trim() !== month) { toast("输入的月份不一致，未解锁", "err"); return; }
+  withButtonBusy(btn, "解锁中…", function () {
+    return run("adminUnlockMonth", getToken(), month, String(typed).trim()).then(function () {
+      ui.lockedMonths = ui.lockedMonths.filter(function (m) { return m !== month; });
+      toast(formatMonthCN(month) + "已解锁", "ok");
+      return loadAll();
+    });
+  }).then(function () { render(); }).catch(function (err) { toast(err.message, "err"); });
+}
+
+/* ---------------- 员工结算确认单 ---------------- */
+
+function slipTimeText(d) {
+  if (d.type === "custom") return "—";
+  if (d.hoursMode === "multi-day") return "全天";
+  if (d.startTime && d.endTime) return esc(d.startTime) + "–" + esc(d.endTime);
+  return "—";
+}
+
+function slipItemsTable(list, kind, r) {
+  var isCustom = kind === "custom";
+  var head = isCustom
+    ? "<tr><th>日期</th><th>说明</th><th class=\"num\">金额</th></tr>"
+    : "<tr><th>日期</th><th>时间</th><th class=\"num\">小时</th><th>说明</th><th class=\"num\">" + (kind === "leave" ? "扣款" : "加班费（×1.2）") + "</th></tr>";
+  if (!list.length) {
+    return '<table class="data slip-table"><thead>' + head + '</thead><tbody><tr><td colspan="' + (isCustom ? 3 : 5) + '" class="tiny">无</td></tr></tbody></table>';
+  }
+  var body = list.map(function (d) {
+    var money = (d.effect < 0 ? "−" : d.effect > 0 && isCustom ? "+" : "") + formatMoney(Math.abs(d.effect)).replace("−", "");
+    if (isCustom) {
+      return "<tr><td>" + esc(d.date) + "</td><td>" + esc(d.note || "") + '</td><td class="num">' + money + "</td></tr>";
+    }
+    return "<tr><td>" + esc(d.date) + "</td><td>" + slipTimeText(d) + '</td><td class="num">' + formatHours(d.hours) + "</td><td>" + esc(d.note || "") + '</td><td class="num">' + money + "</td></tr>";
+  }).join("");
+  var foot;
+  if (kind === "leave") foot = '<tr><td colspan="2">合计</td><td class="num">' + formatHours(r.leaveHours) + '</td><td></td><td class="num">' + (r.leavePay ? "−" + formatMoney(r.leavePay) : formatMoney(0)) + "</td></tr>";
+  else if (kind === "overtime") foot = '<tr><td colspan="2">合计</td><td class="num">' + formatHours(r.otHours) + '</td><td></td><td class="num">' + formatMoney(r.otPay) + "</td></tr>";
+  else foot = '<tr><td colspan="2">合计</td><td class="num">' + formatMoney(r.customSum) + "</td></tr>";
+  return '<table class="data slip-table"><thead>' + head + "</thead><tbody>" + body + "</tbody><tfoot>" + foot + "</tfoot></table>";
+}
+
+function renderSlip(r, S) {
+  var leaves = r.details.filter(function (d) { return d.type === "leave"; });
+  var ots = r.details.filter(function (d) { return d.type === "overtime"; });
+  var customs = r.details.filter(function (d) { return d.type === "custom"; });
+  var locked = !!S.locked;
+  var status = locked
+    ? '<span class="badge badge-approved">已锁定 · 快照 ' + esc(String(S.lockedAt || "").replace("T", " ").slice(0, 16)) + "</span>"
+    : '<span class="badge badge-pending">未锁定 · 实时计算，仅供核对</span>';
+  var line = function (label, value, cls) {
+    return '<div class="slip-line' + (cls ? " " + cls : "") + '"><span>' + label + '</span><span class="num">' + value + "</span></div>";
+  };
+  var capacity = r.capacity || r.workdays * 8.5;
+  return '<section class="card card-pad slip">' +
+    '<header class="slip-head"><div class="brand"><div class="logo">F7</div><div><h2 class="slip-title">员工结算确认单</h2>' +
+    '<div class="tiny">FEST7 · ' + esc(formatMonthCN(S.ym || ui.month)) + "</div></div></div>" + status + "</header>" +
+    '<div class="slip-meta grid-3">' +
+    '<div><div class="tiny">员工</div><strong>' + esc(r.emp.name) + "</strong></div>" +
+    '<div><div class="tiny">结算月份</div><strong>' + esc(S.ym || ui.month) + "</strong></div>" +
+    '<div><div class="tiny">员工编号</div><span class="num">' + esc(r.emp.id) + "</span></div></div>" +
+    '<h3 class="slip-h">一、基本工资与小时费率</h3>' +
+    '<table class="data slip-table"><tbody>' +
+    '<tr><td>月基本工资</td><td class="num">' + formatMoney(r.base) + "</td></tr>" +
+    "<tr><td>本月工作日（周一至周五，假日不扣除）</td><td class=\"num\">" + r.workdays + " 天</td></tr>" +
+    "<tr><td>标准工时（工作日 × 8.5）</td><td class=\"num\">" + formatHours(capacity) + " 小时</td></tr>" +
+    "<tr><td>小时费率（基本工资 ÷ 标准工时）</td><td class=\"num\">" + formatMoney(r.rateRounded) + " / 小时</td></tr>" +
+    "</tbody></table>" +
+    '<h3 class="slip-h">二、请假明细（按小时费率扣款）</h3>' + slipItemsTable(leaves, "leave", r) +
+    '<h3 class="slip-h">三、加班明细（小时费率 × 1.2）</h3>' + slipItemsTable(ots, "overtime", r) +
+    '<h3 class="slip-h">四、自定义调整</h3>' + slipItemsTable(customs, "custom", r) +
+    '<h3 class="slip-h">五、汇总</h3>' +
+    '<div class="slip-sum">' +
+    line("月基本工资", formatMoney(r.base)) +
+    line("− 请假扣款", r.leavePay ? "−" + formatMoney(r.leavePay) : formatMoney(0)) +
+    line("+ 加班费", formatMoney(r.otPay)) +
+    line("± 自定义调整", formatMoney(r.customSum)) +
+    line("<strong>应发合计</strong>", "<strong>" + formatMoney(r.gross) + "</strong>", "slip-total") +
+    line("其中：银行卡转账", formatMoney(r.bank)) +
+    line("其中：现金支付", formatMoney(r.cash)) +
+    "</div>" +
+    '<p class="tiny" style="margin:8px 0 0">扣款与加班费按未取整的小时费率、以合计小时计算后取整到分，逐项金额相加可能与合计有 €0.01 的尾差。</p>' +
+    '<div class="slip-sign grid-2">' +
+    '<div><div class="slip-sign-line"></div><div class="tiny">员工签字</div><div class="slip-sign-line short"></div><div class="tiny">日期</div></div>' +
+    '<div><div class="slip-sign-line"></div><div class="tiny">管理员签字</div><div class="slip-sign-line short"></div><div class="tiny">日期</div></div>' +
+    "</div>" +
+    '<footer class="slip-foot">内部对账确认单，不替代正式工资单（busta paga）</footer>' +
+    "</section>";
+}
+
+function renderSlips() {
+  var S = ui.settlement;
+  if (!S) return '<div class="card empty">正在加载结算…</div>';
+  var rows = ui.slip.all ? S.rows : S.rows.filter(function (r) { return r.emp.id === ui.slip.empId; });
+  var title = ui.slip.all ? "全部员工结算确认单（" + rows.length + " 份）" : "结算确认单";
+  return '<div class="toolbar no-print"><div class="page-intro" style="margin:0"><h2>' + esc(title) + "</h2>" +
+    "<p>" + esc(formatMonthCN(S.ym || ui.month)) + (S.locked ? " · 已锁定，数据来自快照" : " · 未锁定，数据为实时计算") + "。打印时每位员工单独一页。</p></div>" +
+    '<div class="row"><button type="button" class="btn btn-ghost" id="slip-back">返回</button>' +
+    '<button type="button" class="btn btn-primary" id="slip-print">打印</button></div></div>' +
+    (rows.length ? '<div class="slips">' + rows.map(function (r) { return renderSlip(r, S); }).join("") + "</div>" : '<div class="card empty">没有找到该员工的结算数据。</div>');
+}
+
+function bindSlips() {
+  var back = document.getElementById("slip-back");
+  if (back) back.addEventListener("click", function () {
+    var empId = ui.slip && ui.slip.empId;
+    ui.slip = null;
+    ui.selectedEmpId = empId || null;
+    render();
+  });
+  var print = document.getElementById("slip-print");
+  if (print) print.addEventListener("click", function () { window.print(); });
 }
 
 function setStatus(id, status, btn) {
