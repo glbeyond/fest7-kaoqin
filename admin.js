@@ -22,7 +22,8 @@ var ui = {
   pendingRender: false,
   lock: null,
   lockedMonths: [],
-  slip: null
+  slip: null,
+  slipPicker: null
 };
 
 function readBootstrapCache(month) {
@@ -99,7 +100,7 @@ function refreshInBackground() {
 }
 
 function renderIfIdle() {
-  if (isFormFieldFocused() || ui.editing) {
+  if (isFormFieldFocused() || ui.editing || ui.slipPicker) {
     ui.pendingRender = true;
     setRefreshing(ui.refreshing);
     var ind = document.getElementById("admin-sync-ind");
@@ -213,7 +214,7 @@ function renderSettle() {
   return '<div class="toolbar">' +
     '<label class="field" style="min-width:180px">结算月份<input id="month-input" type="month" value="' + esc(ui.month) + '"></label>' +
     '<div class="row"><button type="button" class="btn btn-ghost" id="export-csv">导出本月结算 CSV</button>' +
-    '<button type="button" class="btn btn-ghost" id="print-all-slips">打印全部确认单</button>' + lockBtn + "</div></div>" +
+    '<button type="button" class="btn btn-ghost" id="pick-slips">生成确认单</button>' + lockBtn + "</div></div>" +
     lockBanner + kpis + unmatched +
     '<div class="table-wrap"><table class="data" id="settle-table"><thead><tr>' +
     "<th>姓名</th><th class=\"num\">基本工资</th><th class=\"num\">小时费率</th><th class=\"num\">请假(h)</th><th class=\"num\">请假扣款</th><th class=\"num\">加班(h)</th><th class=\"num\">加班费</th><th class=\"num\">自定义</th><th class=\"num\">应发合计</th><th class=\"num\">银行卡</th><th class=\"num\">现金应付</th>" +
@@ -225,7 +226,8 @@ function renderSettle() {
     "标准工作时段 08:45–13:00、14:00–18:15；" + formatMonthCN(ui.month) + "共 " + S.workdays + " 个工作日（周一至周五，假日不扣除）。点击员工行可查看" + (locked ? "明细和结算确认单" : "并编辑已审批明细，或打开结算确认单") + "。带 * 的姓名表示有备注。<br>" +
     "<code>锁定结算</code> 会把本月每位员工的结果保存为快照；锁定后本月显示快照，不再随后续修改变化。如需更正，先解锁、修改，再重新锁定。</div>" +
     (ui.selectedEmpId ? renderDrawer(S) : "") +
-    (ui.editing ? renderEditModal() : "");
+    (ui.editing ? renderEditModal() : "") +
+    (ui.slipPicker ? renderSlipPicker(S) : "");
 }
 
 function renderDrawer(S) {
@@ -412,6 +414,7 @@ function changeMonth(nextMonth, preferEmployeesTab) {
   ui.month = nextMonth || currentMonth();
   ui.selectedEmpId = null;
   ui.slip = null;
+  ui.slipPicker = null;
   var cached = readBootstrapCache(ui.month);
   if (cached) applyBootstrap(cached);
   else ui.settlement = null;
@@ -445,6 +448,7 @@ function bindAdmin() {
     b.addEventListener("click", function () {
       ui.tab = b.getAttribute("data-tab");
       ui.slip = null;
+      ui.slipPicker = null;
       ui.selectedEmpId = null;
       ui.editing = null;
       render();
@@ -508,14 +512,16 @@ function bindAdmin() {
   if (lockBtn) lockBtn.addEventListener("click", function () { lockMonth(lockBtn); });
   var unlockBtn = document.getElementById("unlock-month");
   if (unlockBtn) unlockBtn.addEventListener("click", function () { unlockMonth(unlockBtn); });
-  var printAll = document.getElementById("print-all-slips");
-  if (printAll) printAll.addEventListener("click", function () {
-    if (!ui.settlement || !ui.settlement.rows.length) { toast("本月没有可打印的员工", "err"); return; }
-    ui.slip = { all: true };
+  var pickSlips = document.getElementById("pick-slips");
+  if (pickSlips) pickSlips.addEventListener("click", function () {
+    if (!ui.settlement || !ui.settlement.rows.length) { toast("本月没有可生成确认单的员工", "err"); return; }
+    var sel = {};
+    ui.settlement.rows.forEach(function (r) { sel[r.emp.id] = true; });
+    ui.slipPicker = { selected: sel };
     ui.selectedEmpId = null;
     render();
-    window.scrollTo(0, 0);
   });
+  bindSlipPicker();
   var openSlip = document.getElementById("open-slip");
   if (openSlip) openSlip.addEventListener("click", function () {
     ui.slip = { empId: openSlip.getAttribute("data-slip") };
@@ -812,6 +818,77 @@ function unlockMonth(btn) {
 
 /* ---------------- 员工结算确认单 ---------------- */
 
+function pickerSelectedIds() {
+  var S = ui.settlement;
+  if (!S || !ui.slipPicker) return [];
+  return S.rows.filter(function (r) { return ui.slipPicker.selected[r.emp.id]; }).map(function (r) { return r.emp.id; });
+}
+
+function renderSlipPicker(S) {
+  var sel = ui.slipPicker.selected;
+  var count = pickerSelectedIds().length;
+  var items = S.rows.map(function (r) {
+    var extra = r.emp.active === false && !S.locked ? ' <span class="badge badge-rejected">已停用</span>' : "";
+    return '<label class="field slip-pick-item" style="flex-direction:row;align-items:center;gap:8px;font-weight:500">' +
+      '<input type="checkbox" data-pick="' + esc(r.emp.id) + '"' + (sel[r.emp.id] ? " checked" : "") + ' style="width:auto">' +
+      '<span class="name-cell" style="flex:1">' + esc(r.emp.name) + extra + "</span>" +
+      '<span class="num tiny">应发 ' + formatMoney(r.gross) + "</span></label>";
+  }).join("");
+  return '<div class="modal-bg" id="pick-bg"><div class="card card-pad modal stack" id="pick-modal">' +
+    '<h3 style="margin:0">生成结算确认单 · ' + esc(formatMonthCN(S.ym || ui.month)) + "</h3>" +
+    '<p class="muted" style="margin:0;font-size:13px">勾选要生成确认单的员工，打印时每人单独一页。' + (S.locked ? "本月已锁定，数据来自快照。" : "本月未锁定，数据为实时计算。") + "</p>" +
+    '<div class="row"><button type="button" class="btn btn-ghost btn-sm" id="pick-all">全选</button>' +
+    '<button type="button" class="btn btn-ghost btn-sm" id="pick-none">全不选</button>' +
+    '<span class="tiny" id="pick-count">已选 ' + count + " / " + S.rows.length + " 人</span></div>" +
+    '<div class="stack slip-pick-list" style="gap:8px;max-height:50vh;overflow:auto;padding:2px">' + items + "</div>" +
+    '<div class="row" style="justify-content:flex-end">' +
+    '<button type="button" class="btn btn-ghost" id="pick-cancel">取消</button>' +
+    '<button type="button" class="btn btn-primary" id="pick-go"' + (count ? "" : " disabled") + ">生成确认单</button></div>" +
+    "</div></div>";
+}
+
+function updatePickerCount() {
+  var n = pickerSelectedIds().length;
+  var total = ui.settlement ? ui.settlement.rows.length : 0;
+  var c = document.getElementById("pick-count");
+  if (c) c.textContent = "已选 " + n + " / " + total + " 人";
+  var go = document.getElementById("pick-go");
+  if (go) go.disabled = !n;
+}
+
+function bindSlipPicker() {
+  if (!ui.slipPicker) return;
+  Array.prototype.forEach.call(document.querySelectorAll("[data-pick]"), function (cb) {
+    cb.addEventListener("change", function () {
+      ui.slipPicker.selected[cb.getAttribute("data-pick")] = cb.checked;
+      updatePickerCount();
+    });
+  });
+  function setAll(on) {
+    (ui.settlement ? ui.settlement.rows : []).forEach(function (r) { ui.slipPicker.selected[r.emp.id] = on; });
+    Array.prototype.forEach.call(document.querySelectorAll("[data-pick]"), function (cb) { cb.checked = on; });
+    updatePickerCount();
+  }
+  var all = document.getElementById("pick-all");
+  if (all) all.addEventListener("click", function () { setAll(true); });
+  var none = document.getElementById("pick-none");
+  if (none) none.addEventListener("click", function () { setAll(false); });
+  var close = function () { ui.slipPicker = null; render(); };
+  var cancel = document.getElementById("pick-cancel");
+  if (cancel) cancel.addEventListener("click", close);
+  var bg = document.getElementById("pick-bg");
+  if (bg) bg.addEventListener("click", function (e) { if (e.target === bg) close(); });
+  var go = document.getElementById("pick-go");
+  if (go) go.addEventListener("click", function () {
+    var ids = pickerSelectedIds();
+    if (!ids.length) { toast("请至少选择一名员工", "err"); return; }
+    ui.slipPicker = null;
+    ui.slip = { ids: ids };
+    render();
+    window.scrollTo(0, 0);
+  });
+}
+
 function slipTimeText(d) {
   if (d.type === "custom") return "—";
   if (d.hoursMode === "multi-day") return "全天";
@@ -892,8 +969,11 @@ function renderSlip(r, S) {
 function renderSlips() {
   var S = ui.settlement;
   if (!S) return '<div class="card empty">正在加载结算…</div>';
-  var rows = ui.slip.all ? S.rows : S.rows.filter(function (r) { return r.emp.id === ui.slip.empId; });
-  var title = ui.slip.all ? "全部员工结算确认单（" + rows.length + " 份）" : "结算确认单";
+  var rows = ui.slip.all ? S.rows
+    : ui.slip.ids ? S.rows.filter(function (r) { return ui.slip.ids.indexOf(r.emp.id) !== -1; })
+    : S.rows.filter(function (r) { return r.emp.id === ui.slip.empId; });
+  var title = ui.slip.empId ? "结算确认单"
+    : (rows.length === S.rows.length ? "全部员工结算确认单" : "所选员工结算确认单") + "（" + rows.length + " 份）";
   return '<div class="toolbar no-print"><div class="page-intro" style="margin:0"><h2>' + esc(title) + "</h2>" +
     "<p>" + esc(formatMonthCN(S.ym || ui.month)) + (S.locked ? " · 已锁定，数据来自快照" : " · 未锁定，数据为实时计算") + "。打印时每位员工单独一页。</p></div>" +
     '<div class="row"><button type="button" class="btn btn-ghost" id="slip-back">返回</button>' +

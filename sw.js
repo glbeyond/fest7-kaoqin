@@ -2,18 +2,18 @@
  * 静态资源：cache-first，后台更新。
  * script.google.com API（含 POST）走网络，不写入缓存。
  */
-var CACHE_VER = "fest7-kaoqin-v8";
+var CACHE_VER = "fest7-kaoqin-v9";
 var PRECACHE = [
   "./",
   "./index.html",
   "./admin.html",
-  "./app.css?v=6",
-  "./config.js?v=6",
-  "./utils.js?v=6",
-  "./api.js?v=6",
-  "./submit.js?v=6",
-  "./admin.js?v=6",
-  "./pwa.js?v=6",
+  "./app.css?v=7",
+  "./config.js?v=7",
+  "./utils.js?v=7",
+  "./api.js?v=7",
+  "./submit.js?v=7",
+  "./admin.js?v=7",
+  "./pwa.js?v=7",
   "./manifest.webmanifest",
   "./manifest-admin.webmanifest",
   "./favicon.svg",
